@@ -224,6 +224,7 @@ async def _handle_chat_message(interview_id: str, msg: dict) -> None:
         f"## Interviewerの質問\n{content}\n\n"
         f"上記の文脈を踏まえてInterviewerの質問に回答し、"
         f"関連する参照情報があれば提供してください。"
+        f"質問案は不要なのでsuggested_questionsは空配列にしてください。"
     )
     try:
         suggestion = await asyncio.wait_for(
@@ -237,8 +238,9 @@ async def _handle_chat_message(interview_id: str, msg: dict) -> None:
         logger.error("Agent chat call failed: %s", e)
         return
 
-    # Add "chat" card title and send
+    # Add "chat" card title, strip questions, and send
     suggestion["cardTitle"] = "Chat" if lang == "en" else "チャット"
+    suggestion["suggestedQuestions"] = []  # Chat should not include question suggestions
     for ws in _connections.get(interview_id, []):
         await _send_full(ws, suggestion)
 

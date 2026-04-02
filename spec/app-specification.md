@@ -358,11 +358,13 @@ response = openai.responses.create(
 )
 ```
 
-### 4.4 Interviewer → AI 補足質問チャット
+### 4.4 Interviewer → AI チャット Q&A
 
 - 中央ペイン下部のチャットボックスで Interviewer がエージェントに直接質問可能
-- 質問内容は同一 conversation に追加して送信
-- エージェント応答は中央ペインの AI 提示エリアに表示
+- 毎回新規の conversation を作成し、インタビュー詳細情報 + 直近の文字起こし履歴（5000文字）+ 質問内容をプロンプトに含めて送信
+- エージェントは質問への**回答と関連する参照情報のみ**を返す（質問案は返さない）
+- 応答は中央ペインに「チャット」タイトル付きのカードとして表示
+- 参照情報のリンクは右ペインにも追加される
 
 ### 4.5 最終レポート生成
 
@@ -537,9 +539,11 @@ response = openai.responses.create(
 
 | エンドポイント | 方向 | メッセージ型 | 説明 |
 |---|---|---|---|
-| `/ws/interview/{id}` | Client → Server | `transcript` | 文字起こしテキスト送信 |
-| `/ws/interview/{id}` | Client → Server | `chat_message` | Interviewer の補足質問 |
-| `/ws/interview/{id}` | Server → Client | `agent_suggestion` | エージェントの関連情報・質問案 |
+| `/ws/interview/{id}` | Client → Server | `transcript` | 文字起こしテキスト送信（DB保存のみ） |
+| `/ws/interview/{id}` | Client → Server | `supplementary_info` | 無音検出後バッファテキスト送信 → 補足情報生成 |
+| `/ws/interview/{id}` | Client → Server | `generate_questions` | 「次の質問を生成」ボタン → 質問案生成 |
+| `/ws/interview/{id}` | Client → Server | `chat_message` | Interviewer のチャット質問 → 回答+参照情報（質問案なし） |
+| `/ws/interview/{id}` | Server → Client | `agent_suggestion` | エージェントの関連情報・質問案（cardTitle付き） |
 | `/ws/interview/{id}` | Server → Client | `agent_references` | 参照元リンク情報 |
 | `/ws/interview/{id}` | Server → Client | `report_ready` | レポート生成完了通知 |
 
