@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from models.schemas import (
     InterviewCreate,
@@ -44,7 +44,7 @@ async def start_interview(interview_id: str):
 
 
 @router.post("/{interview_id}/stop")
-async def stop_interview(interview_id: str, background_tasks: BackgroundTasks):
+async def stop_interview(interview_id: str, background_tasks: BackgroundTasks, lang: str = Query(default="ja")):
     doc = cosmos_service.get_interview(interview_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Interview not found")
@@ -54,7 +54,7 @@ async def stop_interview(interview_id: str, background_tasks: BackgroundTasks):
     cosmos_service.update_interview(doc)
 
     background_tasks.add_task(
-        report_service.generate_report, interview_id
+        report_service.generate_report, interview_id, lang
     )
     return {"status": "stopped", "reportGenerating": True}
 

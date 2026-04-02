@@ -18,6 +18,7 @@ import {
   sendGenerateQuestions,
   disconnectWebSocket,
 } from "./websocket.js";
+import { getLang, setLang, t, onLangChange, applyTranslations } from "./i18n.js";
 
 let interviewId = null;
 let isRunning = false;
@@ -32,6 +33,27 @@ const btnCloseReport = document.getElementById("btn-close-report");
 const btnDownloadReport = document.getElementById("btn-download-report");
 const reportOverlay = document.getElementById("report-modal-overlay");
 let _lastReportMarkdown = "";
+
+// ── Language toggle ──
+const btnLangJa = document.getElementById("btn-lang-ja");
+const btnLangEn = document.getElementById("btn-lang-en");
+
+function _updateLangButtons(lang) {
+  btnLangJa.classList.toggle("active", lang === "ja");
+  btnLangEn.classList.toggle("active", lang === "en");
+}
+
+btnLangJa.addEventListener("click", () => setLang("ja"));
+btnLangEn.addEventListener("click", () => setLang("en"));
+
+onLangChange((lang) => {
+  _updateLangButtons(lang);
+  applyTranslations();
+});
+
+// Initialize language on load
+_updateLangButtons(getLang());
+applyTranslations();
 
 // ── Modal registration ──
 initModal(async (data) => {
@@ -53,7 +75,7 @@ btnStart.addEventListener("click", async () => {
 
   try {
     btnStart.disabled = true;
-    btnStart.textContent = "開始中...";
+    btnStart.textContent = t("btnStarting");
 
     await fetch(`/api/interviews/${interviewId}/start`, { method: "POST" });
 
@@ -64,17 +86,17 @@ btnStart.addEventListener("click", async () => {
       onReportReady: () => {
         btnReport.disabled = false;
       },
-    });
+    }, getLang());
 
     // Start Voice Live transcription
     try {
       await startVoiceLive((transcript) => {
         appendTranscript(transcript);
         sendTranscript(transcript);
-      });
+      }, getLang());
     } catch (err) {
       console.error("Voice Live error:", err);
-      appendTranscript("[Voice Live 接続エラー: " + err.message + "]");
+      appendTranscript("[" + t("voiceLiveError") + err.message + "]");
     }
 
     isRunning = true;
@@ -84,10 +106,10 @@ btnStart.addEventListener("click", async () => {
     btnGenerateQuestions.disabled = false;
   } catch (err) {
     console.error("Start error:", err);
-    alert("開始に失敗しました: " + err.message);
+    alert(t("startFailed") + err.message);
     btnStart.disabled = false;
   } finally {
-    btnStart.textContent = "開始";
+    btnStart.textContent = t("btnStart");
   }
 });
 
@@ -102,7 +124,7 @@ btnStop.addEventListener("click", async () => {
   }
 
   try {
-    await fetch(`/api/interviews/${interviewId}/stop`, { method: "POST" });
+    await fetch(`/api/interviews/${interviewId}/stop?lang=${encodeURIComponent(getLang())}`, { method: "POST" });
   } catch (err) {
     console.error("Stop API error:", err);
   }
@@ -121,10 +143,10 @@ btnStop.addEventListener("click", async () => {
 btnGenerateQuestions.addEventListener("click", () => {
   sendGenerateQuestions();
   btnGenerateQuestions.disabled = true;
-  btnGenerateQuestions.textContent = "生成中...";
+  btnGenerateQuestions.textContent = t("btnGenerating");
   setTimeout(() => {
     btnGenerateQuestions.disabled = false;
-    btnGenerateQuestions.textContent = "次の質問を生成";
+    btnGenerateQuestions.textContent = t("btnGenerateQuestions");
   }, 10000);
 });
 
@@ -193,7 +215,7 @@ function showNewInterviewButton() {
   const btn = document.createElement("button");
   btn.id = "btn-new-interview";
   btn.className = "btn-primary";
-  btn.textContent = "新規インタビューを始める";
+  btn.textContent = t("btnNewInterview");
   btn.style.width = "100%";
   btn.style.marginTop = "8px";
   btn.addEventListener("click", () => {

@@ -10,7 +10,7 @@ from models.schemas import new_report_doc
 logger = logging.getLogger(__name__)
 
 
-def generate_report(interview_id: str, notify_callback=None) -> None:
+def generate_report(interview_id: str, lang: str = "ja", notify_callback=None) -> None:
     """Generate an interview report in the background (sync)."""
     interview = cosmos_service.get_interview(interview_id)
     if not interview:
@@ -28,7 +28,7 @@ def generate_report(interview_id: str, notify_callback=None) -> None:
         logger.info("Generating report for interview %s with %d transcripts", interview_id, len(transcripts))
 
         markdown = agent_service.generate_report(
-            interview, transcripts, agent_responses, chat_messages
+            interview, transcripts, agent_responses, chat_messages, lang
         )
 
         report_doc["markdownContent"] = markdown

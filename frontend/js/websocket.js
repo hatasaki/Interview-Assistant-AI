@@ -14,14 +14,16 @@ const SILENCE_TIMEOUT = 5000; // 5 seconds of silence triggers supplementary inf
 
 export function connectWebSocket(
   interviewId,
-  { onSuggestion, onReferences, onReportReady }
+  { onSuggestion, onReferences, onReportReady },
+  lang
 ) {
   _onSuggestion = onSuggestion;
   _onReferences = onReferences;
   _onReportReady = onReportReady;
 
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const url = `${protocol}//${location.host}/ws/interview/${interviewId}`;
+  const langParam = lang ? `lang=${encodeURIComponent(lang)}` : "";
+  const url = `${protocol}//${location.host}/ws/interview/${interviewId}?${langParam}`;
   _ws = new WebSocket(url);
 
   _ws.onmessage = (event) => {
@@ -49,7 +51,7 @@ export function connectWebSocket(
           onSuggestion,
           onReferences,
           onReportReady,
-        });
+        }, lang);
       }
     }, 3000);
   };

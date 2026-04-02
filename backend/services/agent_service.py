@@ -115,6 +115,19 @@ REPORT_PROMPT_TEMPLATE = """\
 (会話の中で言及された次のステップや課題)
 """
 
+ENGLISH_OUTPUT_INSTRUCTION = (
+    "\n\n## Language Instruction\n"
+    "You MUST output your entire response in English. "
+    "All field values in the JSON (related_info, question, rationale, title) must be written in English. "
+    "Keep the JSON keys unchanged."
+)
+
+ENGLISH_REPORT_INSTRUCTION = (
+    "\n\n## Language Instruction\n"
+    "You MUST write the entire report in English. "
+    "All section titles, headings, and content must be in English."
+)
+
 TOKEN_LIMIT = 100_000
 CHUNK_SIZE = 90_000
 OVERLAP = 10_000
@@ -164,8 +177,11 @@ def create_conversation() -> str:
     return conversation.id
 
 
-def send_message(conversation_id: str, message: str) -> dict:
+def send_message(conversation_id: str, message: str, lang: str = "ja") -> dict:
     """Send a message to the agent and return parsed suggestion."""
+    if lang == "en":
+        message = message + ENGLISH_OUTPUT_INSTRUCTION
+
     openai = _get_openai()
     response = _call_with_retry(lambda: openai.responses.create(
         conversation=conversation_id,
@@ -185,6 +201,7 @@ def generate_report(
     transcripts: list[dict],
     agent_responses: list[dict],
     chat_messages: list[dict],
+    lang: str = "ja",
 ) -> str:
     """Generate a markdown report with preprocessing to fit context window."""
     # 1. Build raw transcript text
@@ -207,6 +224,9 @@ def generate_report(
         transcripts=transcript_text or "(なし)",
         questions=questions or "(なし)",
     )
+
+    if lang == "en":
+        prompt = prompt + ENGLISH_REPORT_INSTRUCTION
 
     openai = _get_openai()
     response = _call_with_retry(lambda: openai.responses.create(

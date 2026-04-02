@@ -9,8 +9,9 @@ let _audioContext = null;
 let _mediaStream = null;
 let _onTranscript = null;
 
-export async function startVoiceLive(onTranscript) {
+export async function startVoiceLive(onTranscript, lang) {
   _onTranscript = onTranscript;
+  const speechLang = lang === "en" ? "en" : "ja";
 
   // Get token from backend
   console.log("[VL] Fetching token...");
@@ -39,14 +40,14 @@ export async function startVoiceLive(onTranscript) {
           input_audio_format: "pcm16",
           input_audio_transcription: {
             model: "azure-speech",
-            language: "ja",
+            language: speechLang,
           },
           turn_detection: {
             type: "azure_semantic_vad_multilingual",
             create_response: false,
             silence_duration_ms: 500,
             threshold: 0.5,
-            languages: ["ja"],
+            languages: [speechLang],
           },
           input_audio_noise_reduction: {
             type: "azure_deep_noise_suppression",

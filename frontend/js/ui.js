@@ -2,6 +2,8 @@
  * UI rendering utilities.
  */
 
+import { t } from "./i18n.js";
+
 const transcriptArea = document.getElementById("transcript-area");
 const aiArea = document.getElementById("ai-area");
 const referencesList = document.getElementById("references-list");
@@ -13,8 +15,8 @@ let firstSuggestion = true;
 export function displayIntervieweeInfo(name, affiliation) {
   intervieweeInfo.innerHTML = `
     <div class="info-display">
-      <strong>対象者:</strong> ${escapeHtml(name)}<br/>
-      <strong>所属:</strong> ${escapeHtml(affiliation)}
+      <strong>${t("intervieweeLabel")}</strong> ${escapeHtml(name)}<br/>
+      <strong>${t("affiliationLabel")}</strong> ${escapeHtml(affiliation)}
     </div>
   `;
 }
@@ -54,12 +56,12 @@ export function displaySuggestion(data) {
     html += `<h4>${escapeHtml(data.cardTitle)}</h4>`;
   }
   if (hasInfo) {
-    if (!data.cardTitle) html += `<h4>関連情報</h4>`;
+    if (!data.cardTitle) html += `<h4>${t("relatedInfoTitle")}</h4>`;
     html += `<p>${renderInlineLinks(escapeHtml(data.relatedInfo))}</p>`;
   }
 
   if (hasQuestions) {
-    if (!data.cardTitle) html += `<h4>次の質問案</h4>`;
+    if (!data.cardTitle) html += `<h4>${t("suggestedQuestionsTitle")}</h4>`;
     html += `<ul>`;
     for (const q of questions) {
       if (!q.question || !q.question.trim()) continue;

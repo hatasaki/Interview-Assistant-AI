@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from models.schemas import (
     new_agent_response_doc,
@@ -21,6 +21,7 @@ _connections: dict[str, list[WebSocket]] = {}
 _seq_counters: dict[str, int] = {}
 _interview_cache: dict[str, dict] = {}
 _initial_done: set[str] = set()
+_lang_cache: dict[str, str] = {}
 
 AGENT_TIMEOUT = 60  # seconds
 
@@ -46,12 +47,15 @@ async def notify_report_ready(interview_id: str, report_id: str) -> None:
 
 
 @router.websocket("/ws/interview/{interview_id}")
-async def websocket_endpoint(websocket: WebSocket, interview_id: str):
+async def websocket_endpoint(websocket: WebSocket, interview_id: str, lang: str = Query(default="ja")):
     await websocket.accept()
 
     if interview_id not in _connections:
         _connections[interview_id] = []
     _connections[interview_id].append(websocket)
+
+    # Store language preference
+    _lang_cache[interview_id] = lang
 
     # Initialize on first connection
     if interview_id not in _initial_done:
@@ -69,7 +73,7 @@ async def websocket_endpoint(websocket: WebSocket, interview_id: str):
             )
             try:
                 suggestion = await asyncio.to_thread(
-                    agent_service.send_message, conv_id, context_msg
+                    agent_service.send_message, conv_id, context_msg, lang
                 )
                 await _send_full(websocket, suggestion)
             except Exception as e:
@@ -120,6 +124,7 @@ async def _handle_supplementary(interview_id: str, msg: dict) -> None:
 
     interview = _interview_cache.get(interview_id, {})
     ctx = _interview_context(interview)
+    lang = _lang_cache.get(interview_id, "ja")
 
     conv_id = agent_service.create_conversation()
 
@@ -133,7 +138,7 @@ async def _handle_supplementary(interview_id: str, msg: dict) -> None:
     )
     try:
         suggestion = await asyncio.wait_for(
-            asyncio.to_thread(agent_service.send_message, conv_id, agent_input),
+            asyncio.to_thread(agent_service.send_message, conv_id, agent_input, lang),
             timeout=AGENT_TIMEOUT
         )
         for ws in _connections.get(interview_id, []):
@@ -165,6 +170,7 @@ async def _handle_generate_questions(interview_id: str) -> None:
 
     interview = _interview_cache.get(interview_id, {})
     ctx = _interview_context(interview)
+    lang = _lang_cache.get(interview_id, "ja")
 
     conv_id = agent_service.create_conversation()
 
@@ -178,7 +184,7 @@ async def _handle_generate_questions(interview_id: str) -> None:
     )
     try:
         suggestion = await asyncio.wait_for(
-            asyncio.to_thread(agent_service.send_message, conv_id, agent_input),
+            asyncio.to_thread(agent_service.send_message, conv_id, agent_input, lang),
             timeout=AGENT_TIMEOUT
         )
         for ws in _connections.get(interview_id, []):
@@ -207,6 +213,7 @@ async def _handle_chat_message(interview_id: str, msg: dict) -> None:
 
     interview = _interview_cache.get(interview_id, {})
     ctx = _interview_context(interview)
+    lang = _lang_cache.get(interview_id, "ja")
 
     conv_id = agent_service.create_conversation()
 
@@ -220,7 +227,7 @@ async def _handle_chat_message(interview_id: str, msg: dict) -> None:
     )
     try:
         suggestion = await asyncio.wait_for(
-            asyncio.to_thread(agent_service.send_message, conv_id, agent_input),
+            asyncio.to_thread(agent_service.send_message, conv_id, agent_input, lang),
             timeout=AGENT_TIMEOUT
         )
     except asyncio.TimeoutError:
@@ -231,7 +238,7 @@ async def _handle_chat_message(interview_id: str, msg: dict) -> None:
         return
 
     # Add "chat" card title and send
-    suggestion["cardTitle"] = "チャット"
+    suggestion["cardTitle"] = "Chat" if lang == "en" else "チャット"
     for ws in _connections.get(interview_id, []):
         await _send_full(ws, suggestion)
 
