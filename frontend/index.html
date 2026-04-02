@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interview Assistant AI</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Interview Assistant AI</h1>
+    </header>
+
+    <main class="app-main">
+      <!-- Left Pane -->
+      <aside class="pane pane-left">
+        <div class="controls">
+          <button id="btn-start" disabled>開始</button>
+          <button id="btn-stop" disabled>終了</button>
+        </div>
+        <div class="transcript-area" id="transcript-area">
+          <p class="placeholder">文字起こしがここに表示されます</p>
+        </div>
+        <div class="report-controls">
+          <button id="btn-report" disabled>レポート表示</button>
+        </div>
+      </aside>
+
+      <!-- Center Pane -->
+      <section class="pane pane-center">
+        <div class="interviewee-info" id="interviewee-info">
+          <button id="btn-register" class="btn-primary">インタビュー詳細登録</button>
+        </div>
+        <div class="ai-area" id="ai-area">
+          <p class="placeholder">AIの提案がここに表示されます</p>
+        </div>
+        <div class="chat-box">
+          <button id="btn-generate-questions" class="btn-primary" disabled>次の質問を生成</button>
+          <input
+            type="text"
+            id="chat-input"
+            placeholder="質問を入力..."
+            disabled
+          />
+          <button id="btn-send" disabled>送信</button>
+        </div>
+      </section>
+
+      <!-- Right Pane -->
+      <aside class="pane pane-right">
+        <h3>参照元リンク</h3>
+        <ul id="references-list" class="references-list"></ul>
+      </aside>
+    </main>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modal-overlay" hidden>
+      <div class="modal">
+        <h2>インタビュー詳細登録</h2>
+        <form id="interview-form">
+          <label>
+            インタビュー対象者の名前 <span class="required">*</span>
+            <input type="text" id="field-name" required />
+          </label>
+          <label>
+            所属 <span class="required">*</span>
+            <input type="text" id="field-affiliation" required />
+          </label>
+          <label>
+            関連情報
+            <textarea id="field-related-info" rows="4"></textarea>
+          </label>
+          <label>
+            インタビュー時間（分） <span class="required">*</span>
+            <input type="number" id="field-duration" min="1" required />
+          </label>
+          <label>
+            ゴール <span class="required">*</span>
+            <textarea id="field-goal" rows="3" required></textarea>
+          </label>
+          <div class="modal-actions">
+            <button type="button" id="btn-cancel-modal">キャンセル</button>
+            <button type="submit" class="btn-primary">登録</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Report Modal -->
+    <div class="modal-overlay" id="report-modal-overlay" hidden>
+      <div class="modal modal-wide">
+        <div class="modal-header">
+          <h2>インタビューレポート</h2>
+          <div>
+            <button id="btn-download-report" class="btn-primary">ダウンロード</button>
+            <button id="btn-close-report" class="btn-close">&times;</button>
+          </div>
+        </div>
+        <div id="report-content" class="report-content"></div>
+      </div>
+    </div>
+
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>

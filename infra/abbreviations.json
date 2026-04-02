@@ -1,0 +1,8 @@
+{
+  "cognitiveServicesAccounts": "cog-",
+  "documentDBDatabaseAccounts": "cosmos-",
+  "resourcesResourceGroups": "rg-",
+  "webServerFarms": "plan-",
+  "webSitesAppService": "app-",
+  "storageAccounts": "st"
+}

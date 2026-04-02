@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+name: interview-assistant-ai
+metadata:
+  template: interview-assistant-ai
+
+services:
+  backend:
+    project: ./backend
+    language: python
+    host: appservice
+    hooks:
+      prepackage:
+        windows:
+          shell: pwsh
+          run: |
+            $ErrorActionPreference = "Stop"
+            if (Test-Path "static") { Remove-Item -Recurse -Force "static" }
+            New-Item -ItemType Directory -Path "static" -Force | Out-Null
+            Push-Location "../frontend"
+            npm ci
+            npm run build
+            Pop-Location
+            Copy-Item -Path "../frontend/dist/*" -Destination "static" -Recurse -Force
+        posix:
+          shell: sh
+          run: |
+            set -e
+            rm -rf static
+            mkdir -p static
+            cd ../frontend
+            npm ci
+            npm run build
+            cd ../backend
+            cp -r ../frontend/dist/* static/
+
+infra:
+  provider: bicep
+  path: infra
