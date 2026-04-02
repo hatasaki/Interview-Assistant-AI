@@ -1,16 +1,161 @@
 # Interview Assistant AI
 
+A browser-based interview assistant web application. It supports the Interviewer through real-time transcription, related information presented by an AI agent, and suggested next questions.
+
+## Overview
+
+An AI-powered tool designed to help a novice Interviewer effectively elicit tacit knowledge from an expert Interviewee.
+
+- **Real-time Transcription**: Azure Voice Live API (direct WebSocket connection, Japanese/English support via `azure_semantic_vad_multilingual`)
+- **Supplementary Information**: Detects pauses in conversation, automatically searches for technical terms and concepts, and provides beginner-friendly explanations
+- **Question Generation**: Suggests effective next questions based on transcript history at the click of a button
+- **Chat Q&A**: The Interviewer can ask the AI questions in real time
+- **Report Generation**: Automatically generates a Markdown report based on transcript content after the interview ends
+- **JP/EN Language Toggle**: Switch between Japanese and English UI and agent output via a toggle button in the header
+
+## Architecture
+
+| Layer | Technology |
+|---|---|
+| Frontend | JavaScript (Vanilla JS) + Vite |
+| Backend | Python (FastAPI) on Azure App Service |
+| Real-time Transcription | Azure Voice Live API (direct WebSocket connection) |
+| AI Agent | Microsoft Foundry Agent Service (azure-ai-projects v2) |
+| Agent Tool | Microsoft Learn MCP Server |
+| Data Store | Azure Cosmos DB for NoSQL (Serverless) |
+| Authentication | Managed Identity (DefaultAzureCredential) |
+| Infrastructure | Bicep (New Foundry: CognitiveServices/accounts + projects) |
+
+## Prerequisites
+
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli)
+- [Azure Developer CLI (azd)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
+- [Node.js](https://nodejs.org/) >= 18
+- [Python](https://www.python.org/) >= 3.12
+
+## Deployment
+
+```bash
+azd auth login
+azd up
+```
+
+`azd up` automatically performs the following:
+1. Build the frontend (`npm ci && npm run build`) → copy to `backend/static/`
+2. Provision Azure resources (Bicep)
+3. Deploy the backend (App Service)
+
+## Local Development
+
+### Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+
+export AZURE_COSMOS_DB_ENDPOINT="https://<your-cosmos>.documents.azure.com:443/"
+export AZURE_AI_PROJECT_ENDPOINT="https://<resource>.services.ai.azure.com/api/projects/<project>"
+export AZURE_VOICELIVE_ENDPOINT="https://<resource>.services.ai.azure.com"
+export AZURE_VOICELIVE_MODEL="gpt-4o-mini"
+
+uvicorn app:app --reload --port 8000
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## Project Structure
+
+```
+├── azure.yaml              # azd configuration
+├── infra/                   # Bicep infrastructure definitions (New Foundry)
+│   ├── main.bicep
+│   └── modules/
+│       ├── ai-foundry.bicep    # CognitiveServices/accounts + projects
+│       ├── ai-rbac.bicep
+│       ├── app-service.bicep
+│       ├── cosmos-db.bicep
+│       └── cosmos-rbac.bicep
+├── backend/
+│   ├── app.py               # FastAPI entry point
+│   ├── startup.sh            # App Service startup script
+│   ├── config.py
+│   ├── routers/
+│   │   ├── interviews.py     # REST API
+│   │   ├── voicelive.py      # Voice Live token issuance
+│   │   └── websocket.py      # WebSocket (3 agent roles)
+│   ├── services/
+│   │   ├── agent_service.py   # Foundry Agent + MCP + report generation
+│   │   ├── cosmos_service.py
+│   │   └── report_service.py
+│   └── models/
+├── frontend/
+│   ├── index.html
+│   ├── js/
+│   │   ├── app.js
+│   │   ├── i18n.js           # JP/EN internationalization
+│   │   ├── voicelive.js      # Voice Live direct WebSocket connection
+│   │   ├── websocket.js      # Backend communication + silence detection
+│   │   ├── ui.js
+│   │   └── modal.js
+│   ├── public/js/
+│   │   └── pcm-processor.js  # AudioWorklet
+│   └── css/
+├── spec/
+│   └── app-specification.md
+└── .github/
+    └── workflows/deploy.yml
+```
+
+## Three Roles of the Assistant Agent
+
+| Role | Trigger | Behavior |
+|---|---|---|
+| **Supplementary Info** | Pause in conversation (5s silence) | Detects technical terms, searches via MCP Server, displays beginner-friendly explanations |
+| **Question Generation** | "Generate Questions" button | Generates up to 3 question suggestions from the last 5,000 characters of transcript |
+| **Chat** | Send from the chat box | Provides answers and references based on transcript context |
+
+Each role uses an independent conversation to prevent context bloat.
+
+## Azure Resources
+
+| Resource | Purpose |
+|---|---|
+| App Service (Linux, Python 3.12) | Application hosting |
+| AI Foundry (CognitiveServices/accounts) | Agent Service / Voice Live API |
+| Foundry Project (CognitiveServices/accounts/projects) | Agent management |
+| Cosmos DB for NoSQL (Serverless) | Data persistence |
+
+All inter-resource authentication uses **Managed Identity** (key-based authentication is prohibited).
+
+## Technical Notes
+
+- **Voice Live SDK Limitation**: `@azure/ai-voicelive` v1.0.0-beta.3 does not serialize `input_audio_transcription`, so a direct WebSocket connection is used instead
+- **Browser WebSocket Authentication**: Bearer token is sent via the `authorization` query parameter
+- **Report Generation**: Uses a direct model call instead of going through the agent (to avoid JSON output constraints)
+- **Noise Removal**: Large transcripts are chunked at 90K tokens + 10K overlap and processed by the LLM
+
+---
+
+# Interview Assistant AI (日本語)
+
 ブラウザベースのインタビュー補助 Web アプリケーション。リアルタイム文字起こし・AI エージェントによる関連情報提示・次の質問案提示を通じて Interviewer をサポートします。
 
 ## 概要
 
 エキスパート（Interviewee）の暗黙知を素人（Interviewer）が効果的に引き出すための AI 補助ツールです。
 
-- **リアルタイム文字起こし**: Azure Voice Live API（WebSocket 直接接続、`azure_semantic_vad_multilingual` による日本語対応）
+- **リアルタイム文字起こし**: Azure Voice Live API（WebSocket 直接接続、`azure_semantic_vad_multilingual` による日本語・英語対応）
 - **補足情報提示**: 会話の途切れを検出し、専門用語・技術概念を自動検索して素人向けに解説
 - **質問案生成**: ボタンクリックで文字起こし履歴に基づく効果的な次の質問を提案
 - **チャット Q&A**: Interviewer がリアルタイムに AI に質問可能
 - **レポート生成**: インタビュー終了後、文字起こし内容に基づくマークダウンレポートを自動生成
+- **JP/EN 言語切替**: ヘッダーのトグルボタンで日本語・英語の UI およびエージェント出力を切替可能
 
 ## アーキテクチャ
 
@@ -97,6 +242,7 @@ npm run dev
 │   ├── index.html
 │   ├── js/
 │   │   ├── app.js
+│   │   ├── i18n.js           # JP/EN 国際化
 │   │   ├── voicelive.js      # Voice Live WebSocket 直接接続
 │   │   ├── websocket.js      # バックエンド通信 + 無音検出
 │   │   ├── ui.js
