@@ -868,7 +868,7 @@ graph TB
     subgraph RG["リソースグループ<br/>rg-{environmentName}"]
         subgraph AppService["App Service"]
             PLAN["App Service Plan<br/>(B1 Linux)"]
-            WEB["Web App<br/>(Python 3.12)<br/>SystemAssigned MI"]
+            WEB["Web App<br/>(Python 3.12)<br/>SystemAssigned MI<br/>+ Easy Auth (Entra ID)"]
         end
 
         subgraph AI["Azure AI Foundry"]
@@ -911,6 +911,11 @@ graph TB
 
 ```mermaid
 flowchart LR
+    subgraph EasyAuth["Easy Auth (Entra ID)"]
+        ENTRA["Entra ID<br/>App Registration"]
+        AUTH["authsettingsV2<br/>ユーザー認証"]
+    end
+
     subgraph AppService["App Service"]
         MI["System Assigned<br/>Managed Identity"]
     end
@@ -921,14 +926,22 @@ flowchart LR
         VL["Voice Live API<br/>(同一 AI Services)"]
     end
 
+    ENTRA -->|"ユーザー認証<br/>(Easy Auth)"| AUTH
+    AUTH -->|"認証済みリクエストのみ"| MI
     MI -->|"Cosmos DB Built-in<br/>Data Contributor"| COSMOS
     MI -->|"Azure AI User"| FOUNDRY
     MI -->|"Cognitive Services User<br/>(DefaultAzureCredential<br/>→ Bearer Token)"| VL
 
+    style EasyAuth fill:#fff8e1,stroke:#f9a825
     style AppService fill:#e8f5e9,stroke:#2e7d32
     style Resources fill:#e1f5fe,stroke:#0288d1
 ```
 
+- ユーザー認証は **App Service Easy Auth (Microsoft Entra ID)** で実施
+  - `azd up` の `preprovision` フックで Entra ID App Registration + クライアントシークレットを自動作成
+  - `postprovision` フックで App Service URL に基づくリダイレクト URI を自動設定
+  - Bicep の `authsettingsV2` リソースで Easy Auth を構成
+  - 未認証リクエストはログインページへリダイレクト
 - すべての Azure リソースアクセスは **Managed Identity** で認証（組織ポリシー準拠）
 - アクセスキー・接続文字列・SAS トークンは使用しない
 - App Service の Basic 認証（SCM/FTP）は **無効化**

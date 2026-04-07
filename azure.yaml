@@ -36,3 +36,23 @@ services:
 infra:
   provider: bicep
   path: infra
+
+hooks:
+  preprovision:
+    windows:
+      shell: pwsh
+      run: ./infra/scripts/auth-preprovision.ps1
+      interactive: true
+    posix:
+      shell: sh
+      run: ./infra/scripts/auth-preprovision.sh
+      interactive: true
+  postprovision:
+    windows:
+      shell: pwsh
+      run: ./infra/scripts/auth-postprovision.ps1
+      interactive: true
+    posix:
+      shell: sh
+      run: ./infra/scripts/auth-postprovision.sh
+      interactive: true

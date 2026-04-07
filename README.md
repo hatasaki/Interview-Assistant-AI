@@ -6,7 +6,7 @@ A browser-based interview assistant web application. It supports the Interviewer
 
 An AI-powered tool designed to help a novice Interviewer effectively elicit tacit knowledge from an expert Interviewee.
 
-- **Real-time Transcription**: Azure Voice Live API (direct WebSocket connection, Japanese/English support via `azure_semantic_vad_multilingual`)
+- **Real-time Transcription**: Azure Voice Live API (direct WebSocket connection, Japanese/English support
 - **Supplementary Information**: Detects pauses in conversation, automatically searches for technical terms and concepts, and provides beginner-friendly explanations
 - **Question Generation**: Suggests effective next questions based on transcript history at the click of a button
 - **Chat Q&A**: The Interviewer can ask the AI questions in real time
@@ -24,6 +24,7 @@ An AI-powered tool designed to help a novice Interviewer effectively elicit taci
 | Agent Tool | Microsoft Learn MCP Server |
 | Data Store | Azure Cosmos DB for NoSQL (Serverless) |
 | Authentication | Managed Identity (DefaultAzureCredential) |
+| User Authentication | App Service Easy Auth (Microsoft Entra ID) |
 | Infrastructure | Bicep (New Foundry: CognitiveServices/accounts + projects) |
 
 ## Prerequisites
@@ -41,9 +42,13 @@ azd up
 ```
 
 `azd up` automatically performs the following:
-1. Build the frontend (`npm ci && npm run build`) → copy to `backend/static/`
-2. Provision Azure resources (Bicep)
-3. Deploy the backend (App Service)
+1. Create Entra ID App Registration + client secret (preprovision hook)
+2. Build the frontend (`npm ci && npm run build`) → copy to `backend/static/`
+3. Provision Azure resources including Easy Auth configuration (Bicep)
+4. Set redirect URI on the App Registration (postprovision hook)
+5. Deploy the backend (App Service)
+
+After deployment, the app is protected by Microsoft Entra ID authentication. Only users in the same tenant can access the application.
 
 ## Local Development
 
@@ -72,13 +77,16 @@ npm run dev
 ## Project Structure
 
 ```
-├── azure.yaml              # azd configuration
+├── azure.yaml              # azd configuration (preprovision/postprovision/prepackage hooks)
 ├── infra/                   # Bicep infrastructure definitions (New Foundry)
 │   ├── main.bicep
+│   ├── scripts/
+│   │   ├── auth-preprovision.ps1/sh   # Entra ID App Registration creation
+│   │   └── auth-postprovision.ps1/sh  # Redirect URI configuration
 │   └── modules/
 │       ├── ai-foundry.bicep    # CognitiveServices/accounts + projects
 │       ├── ai-rbac.bicep
-│       ├── app-service.bicep
+│       ├── app-service.bicep   # App Service + Easy Auth (authsettingsV2)
 │       ├── cosmos-db.bicep
 │       └── cosmos-rbac.bicep
 ├── backend/
@@ -130,8 +138,10 @@ Each role uses an independent conversation to prevent context bloat.
 | AI Foundry (CognitiveServices/accounts) | Agent Service / Voice Live API |
 | Foundry Project (CognitiveServices/accounts/projects) | Agent management |
 | Cosmos DB for NoSQL (Serverless) | Data persistence |
+| Entra ID App Registration | Easy Auth user authentication (auto-created by `azd up`) |
 
 All inter-resource authentication uses **Managed Identity** (key-based authentication is prohibited).
+User authentication is handled by **App Service Easy Auth** with Microsoft Entra ID.
 
 ## Technical Notes
 
@@ -150,7 +160,7 @@ All inter-resource authentication uses **Managed Identity** (key-based authentic
 
 エキスパート（Interviewee）の暗黙知を素人（Interviewer）が効果的に引き出すための AI 補助ツールです。
 
-- **リアルタイム文字起こし**: Azure Voice Live API（WebSocket 直接接続、`azure_semantic_vad_multilingual` による日本語・英語対応）
+- **リアルタイム文字起こし**: Azure Voice Live API（WebSocket 直接接続、日本語・英語対応）
 - **補足情報提示**: 会話の途切れを検出し、専門用語・技術概念を自動検索して素人向けに解説
 - **質問案生成**: ボタンクリックで文字起こし履歴に基づく効果的な次の質問を提案
 - **チャット Q&A**: Interviewer がリアルタイムに AI に質問可能
@@ -168,6 +178,7 @@ All inter-resource authentication uses **Managed Identity** (key-based authentic
 | エージェントツール | Microsoft Learn MCP Server |
 | データストア | Azure Cosmos DB for NoSQL (Serverless) |
 | 認証 | Managed Identity (DefaultAzureCredential) |
+| ユーザー認証 | App Service Easy Auth (Microsoft Entra ID) |
 | インフラ | Bicep (New Foundry: CognitiveServices/accounts + projects) |
 
 ## 前提条件
@@ -185,9 +196,13 @@ azd up
 ```
 
 `azd up` により以下が自動実行されます：
-1. フロントエンドのビルド（`npm ci && npm run build`）→ `backend/static/` にコピー
-2. Azure リソースのプロビジョニング（Bicep）
-3. バックエンドのデプロイ（App Service）
+1. Entra ID App Registration + クライアントシークレットの作成 (preprovision フック)
+2. フロントエンドのビルド（`npm ci && npm run build`）→ `backend/static/` にコピー
+3. Azure リソースのプロビジョニング（Bicep / Easy Auth 構成含む）
+4. App Registration のリダイレクト URI 設定 (postprovision フック)
+5. バックエンドのデプロイ（App Service）
+
+デプロイ後、アプリは Microsoft Entra ID 認証で保護されます。同一テナントのユーザーのみアクセス可能です。
 
 ## ローカル開発
 
@@ -216,13 +231,16 @@ npm run dev
 ## プロジェクト構成
 
 ```
-├── azure.yaml              # azd 構成
+├── azure.yaml              # azd 構成（preprovision/postprovision/prepackage フック付き）
 ├── infra/                   # Bicep インフラ定義 (New Foundry)
 │   ├── main.bicep
+│   ├── scripts/
+│   │   ├── auth-preprovision.ps1/sh   # Entra ID App Registration 作成
+│   │   └── auth-postprovision.ps1/sh  # リダイレクト URI 設定
 │   └── modules/
 │       ├── ai-foundry.bicep    # CognitiveServices/accounts + projects
 │       ├── ai-rbac.bicep
-│       ├── app-service.bicep
+│       ├── app-service.bicep   # App Service + Easy Auth (authsettingsV2)
 │       ├── cosmos-db.bicep
 │       └── cosmos-rbac.bicep
 ├── backend/
@@ -274,8 +292,10 @@ npm run dev
 | AI Foundry (CognitiveServices/accounts) | Agent Service / Voice Live API |
 | Foundry Project (CognitiveServices/accounts/projects) | エージェント管理 |
 | Cosmos DB for NoSQL (Serverless) | データ永続化 |
+| Entra ID App Registration | Easy Auth ユーザー認証（`azd up` で自動作成） |
 
 すべてのリソース間認証は **Managed Identity** を使用しています（キーベース認証は禁止）。
+ユーザー認証は **App Service Easy Auth** (Microsoft Entra ID) で保護されています。
 
 ## 技術的な注意事項
 

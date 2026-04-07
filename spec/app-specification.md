@@ -83,7 +83,8 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 | エージェントツール | Microsoft Learn MCP Server | エンドポイント: `https://learn.microsoft.com/api/mcp`（認証不要）|
 | データストア | Azure Cosmos DB for NoSQL | Managed Identity 認証（`azure-cosmos`）|
 | ホスティング | Azure App Service | Basic 認証無効（OIDC デプロイ） |
-| 認証 | DefaultAzureCredential / ManagedIdentityCredential | 組織ポリシー準拠 |
+| ユーザー認証 | App Service Easy Auth (Microsoft Entra ID) | `azd up` 時に自動構成 |
+| リソース間認証 | DefaultAzureCredential / ManagedIdentityCredential | 組織ポリシー準拠 |
 | Voice Live 認証 | Entra ID Bearer Token（バックエンド発行 → フロントエンド利用）| `Cognitive Services User` ロール必要 |
 
 ### 2.2 Azureリソース
@@ -94,6 +95,7 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 | Microsoft Foundry リソース | Voice Live API エンドポイント + Foundry Agent Service（Prompt Agent）|
 | Foundry プロジェクト | エージェント管理。エンドポイント形式: `https://<resource>.ai.azure.com/api/projects/<project>` |
 | Cosmos DB for NoSQL | インタビューデータ永続化 |
+| Entra ID App Registration | App Service Easy Auth 用アプリ登録（`azd up` で自動作成） |
 
 ---
 
@@ -643,13 +645,18 @@ interview-assistant-ai/
 │   ├── main.bicep                     # Azure インフラ定義
 │   ├── abbreviations.json             # リソース名略称
 │   ├── main.parameters.json           # パラメータテンプレート
+│   ├── scripts/
+│   │   ├── auth-preprovision.ps1      # Entra ID App Registration 作成 (Windows)
+│   │   ├── auth-preprovision.sh       # Entra ID App Registration 作成 (Linux/macOS)
+│   │   ├── auth-postprovision.ps1     # リダイレクト URI 設定 (Windows)
+│   │   └── auth-postprovision.sh      # リダイレクト URI 設定 (Linux/macOS)
 │   └── modules/
-│       ├── app-service.bicep          # App Service + Plan
+│       ├── app-service.bicep          # App Service + Plan + Easy Auth (authsettingsV2)
 │       ├── cosmos-db.bicep            # Cosmos DB + コンテナ
 │       ├── cosmos-rbac.bicep          # Cosmos DB RBAC
 │       ├── ai-foundry.bicep           # New Foundry (CognitiveServices/accounts + projects)
 │       └── ai-rbac.bicep              # AI Foundry RBAC
-├── azure.yaml                         # azd 構成（prepackage フック付き）
+├── azure.yaml                         # azd 構成（preprovision/postprovision/prepackage フック付き）
 └── README.md
 ```
 
@@ -685,13 +692,25 @@ pydantic>=2.0
 
 ## 9. 認証・セキュリティ
 
-### 9.1 Azure リソース間認証
+### 9.1 ユーザー認証（Easy Auth）
+
+- **App Service Easy Auth（認証/承認）** を使用し、Microsoft Entra ID でユーザーを認証
+- `azd up` の `preprovision` フックで Entra ID App Registration とクライアントシークレットを自動作成
+- `postprovision` フックで App Service の URL に基づくリダイレクト URI を自動設定
+- Bicep の `authsettingsV2` リソースで Easy Auth を構成:
+  - 未認証リクエスト: ログインページへリダイレクト
+  - トークンストア: 有効
+  - Issuer URL: `https://login.microsoftonline.com/{tenantId}/v2.0`（v2.0 エンドポイント）
+- クライアントシークレットは App Service のアプリ設定 `MICROSOFT_PROVIDER_AUTHENTICATION_SECRET` に格納
+- 認証フロー: ハイブリッドフロー（`response_type=code id_token`）
+
+### 9.2 Azure リソース間認証
 
 - すべて **Managed Identity** を使用（組織ポリシー）
 - `DefaultAzureCredential` によるフォールバック（ローカル開発時は Azure CLI 認証）
 - アクセスキー・接続文字列によるキーベース認証は **禁止**
 
-### 9.2 必要な RBAC ロール
+### 9.3 必要な RBAC ロール
 
 | リソース | ロール | 対象 |
 |---|---|---|
@@ -702,19 +721,17 @@ pydantic>=2.0
 
 > **注意**: Voice Live API の認証には `Cognitive Services User` **と** `Azure AI User` の**両方**のロールが必要。
 
-### 9.3 Voice Live トークン API のセキュリティ
+### 9.4 Voice Live トークン API のセキュリティ
 
-- `GET /api/voicelive/token` エンドポイントは認証されたリクエストのみ受け付けること
-- App Service の Easy Auth（Entra ID 認証）を有効にするか、独自の認証ミドルウェアを実装する
+- `GET /api/voicelive/token` エンドポイントは Easy Auth により認証済みユーザーのみアクセス可能
 - トークンの有効期限を応答に含め、フロントエンドが期限前に再取得できるようにする
 
-### 9.4 WebSocket 接続の認証
+### 9.5 WebSocket 接続の認証
 
-- `/ws/interview/{id}` WebSocket エンドポイントにも認証を適用する
-- 初回接続時にクエリパラメータまたは最初のメッセージでセッショントークンを送信し、バックエンドで検証
+- `/ws/interview/{id}` WebSocket エンドポイントは Easy Auth のセッション Cookie により認証される
 - 不正な接続は直ちに切断する
 
-### 9.5 デプロイ
+### 9.6 デプロイ
 
 - GitHub Actions + OIDC（フェデレーション資格情報）を使用
 - Basic 認証（SCM/FTP）は無効化（組織ポリシー）

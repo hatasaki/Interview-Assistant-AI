@@ -21,6 +21,13 @@ param voiceLiveModel string = 'gpt-4o-mini'
 @description('Model deployment name for Foundry Agent')
 param agentModel string = 'gpt-4o'
 
+@description('Entra ID App Registration client ID for Easy Auth')
+param authClientId string = ''
+
+@secure()
+@description('Entra ID App Registration client secret for Easy Auth')
+param authClientSecret string = ''
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = { 'azd-env-name': environmentName }
@@ -65,6 +72,8 @@ module appService 'modules/app-service.bicep' = {
     aiFoundryEndpoint: aiFoundry.outputs.projectEndpoint
     voiceLiveEndpoint: aiFoundry.outputs.aiServicesEndpoint
     voiceLiveModel: voiceLiveModel
+    authClientId: authClientId
+    authClientSecret: authClientSecret
   }
 }
 
