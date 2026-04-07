@@ -122,11 +122,50 @@ ENGLISH_OUTPUT_INSTRUCTION = (
     "Keep the JSON keys unchanged."
 )
 
-ENGLISH_REPORT_INSTRUCTION = (
-    "\n\n## Language Instruction\n"
-    "You MUST write the entire report in English. "
-    "All section titles, headings, and content must be in English."
-)
+REPORT_PROMPT_TEMPLATE_EN = """\
+Generate a report from the following interview transcript data.
+
+## Most Important Rules
+- The report content MUST be based solely on the transcript in the "Conversation History" section below
+- Do NOT add or fabricate information not contained in the transcript
+- Do NOT include technologies, products, or examples not mentioned in the conversation
+- For unclear points, state "This was not discussed in the conversation"
+
+## Basic Information
+- Interviewee: {name} ({affiliation})
+- Interview Duration: {duration} minutes
+- Goal: {goal}
+
+## Conversation History (Transcript, noise removed)
+{transcripts}
+
+## Questions Suggested by Agent (Reference)
+{questions}
+
+## Output Format
+Output the report in the following markdown format. All section content must be extracted from the conversation history above:
+
+# Interview Report
+
+## Basic Information
+- Interviewee: (Name) (Affiliation)
+- Date: (Date)
+- Interview Duration: (Actual duration)
+- Interview Goal: (Goal)
+
+## Executive Summary
+(Summary of the conversation content. Only content from the conversation.)
+
+## Key Findings
+### Finding 1: (Title)
+(Details of specific findings obtained from the conversation)
+
+## Conversation Highlights
+(Key statements and discussion points from the conversation)
+
+## Future Actions & Recommendations
+(Next steps and issues mentioned in the conversation)
+"""
 
 TOKEN_LIMIT = 100_000
 CHUNK_SIZE = 90_000
@@ -216,17 +255,16 @@ def generate_report(
     questions = _extract_questions(agent_responses)
 
     # 4. Generate report using direct model call (not agent) to get markdown output
-    prompt = REPORT_PROMPT_TEMPLATE.format(
+    template = REPORT_PROMPT_TEMPLATE_EN if lang == "en" else REPORT_PROMPT_TEMPLATE
+    none_text = "(None)" if lang == "en" else "(なし)"
+    prompt = template.format(
         name=interview.get("intervieweeName", ""),
         affiliation=interview.get("intervieweeAffiliation", ""),
         duration=interview.get("durationMinutes", ""),
         goal=interview.get("goal", ""),
-        transcripts=transcript_text or "(なし)",
-        questions=questions or "(なし)",
+        transcripts=transcript_text or none_text,
+        questions=questions or none_text,
     )
-
-    if lang == "en":
-        prompt = prompt + ENGLISH_REPORT_INSTRUCTION
 
     openai = _get_openai()
     response = _call_with_retry(lambda: openai.responses.create(

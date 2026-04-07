@@ -42,5 +42,6 @@ def generate_report(interview_id: str, lang: str = "ja", notify_callback=None) -
         error_detail = traceback.format_exc()
         logger.exception("Failed to generate report for interview %s", interview_id)
         report_doc["status"] = "failed"
-        report_doc["markdownContent"] = f"# レポート生成エラー\n\n```\n{error_detail}\n```"
+        error_title = "# Report Generation Error" if lang == "en" else "# レポート生成エラー"
+        report_doc["markdownContent"] = f"{error_title}\n\n```\n{error_detail}\n```"
         cosmos_service.update_report(report_doc)
