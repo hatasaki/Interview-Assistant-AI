@@ -4,7 +4,7 @@ A browser-based interview assistant web application. It supports the Interviewer
 
 ## Overview
 
-An AI-powered tool designed to help a novice Interviewer effectively elicit tacit knowledge from an expert Interviewee.
+An AI-powered tool designed to help an Interviewer effectively elicit tacit knowledge from an expert Interviewee.
 
 - **Real-time Transcription**: Azure Voice Live API (direct WebSocket connection, Japanese/English support
 - **Supplementary Information**: Detects pauses in conversation, automatically searches for technical terms and concepts, and provides beginner-friendly explanations
@@ -26,6 +26,61 @@ An AI-powered tool designed to help a novice Interviewer effectively elicit taci
 | Authentication | Managed Identity (DefaultAzureCredential) |
 | User Authentication | App Service Easy Auth (Microsoft Entra ID) |
 | Infrastructure | Bicep (New Foundry: CognitiveServices/accounts + projects) |
+
+```mermaid
+graph TB
+    subgraph Browser["Browser (Frontend)"]
+        MIC["🎤 Microphone"]
+        VL_WS["Voice Live WebSocket"]
+        FE["Frontend App<br/>app.js / ui.js / modal.js"]
+        BE_WS["Backend WebSocket Client"]
+    end
+
+    subgraph VoiceLive["Azure Voice Live API"]
+        VL_API["Realtime Transcription<br/>wss://...voice-live/realtime"]
+    end
+
+    subgraph Backend["Backend (FastAPI / App Service)"]
+        AUTH["Easy Auth<br/>(Entra ID)"]
+        APP["FastAPI"]
+        R_VL["/api/voicelive/token"]
+        R_WS["/ws/interview/{id}"]
+        AGT_SVC["Agent Service"]
+        COS_SVC["Cosmos Service"]
+        RPT_SVC["Report Service"]
+    end
+
+    subgraph AI["Azure AI Foundry"]
+        AGENT["Foundry Agent<br/>(GPT-4o + MCP)"]
+        MCP["Microsoft Learn<br/>MCP Server"]
+    end
+
+    subgraph DB["Azure Cosmos DB"]
+        COSMOS[("interviews / transcripts<br/>agent_responses / reports")]
+    end
+
+    MIC -->|"PCM16 audio"| VL_WS
+    VL_WS -->|"base64 audio"| VL_API
+    VL_API -->|"transcription text"| VL_WS
+    VL_WS -->|"transcript"| FE
+
+    FE -->|"HTTP/WS"| AUTH
+    AUTH -->|"authenticated"| APP
+    APP --> R_VL
+    APP --> R_WS
+    R_VL -->|"Bearer Token"| VL_WS
+
+    R_WS --> AGT_SVC
+    R_WS --> COS_SVC
+    RPT_SVC --> AGT_SVC
+    RPT_SVC --> COS_SVC
+
+    AGT_SVC -->|"Managed Identity"| AGENT
+    AGENT -->|"MCP Protocol"| MCP
+    COS_SVC -->|"Managed Identity"| COSMOS
+
+    BE_WS -->|"agent_suggestion<br/>agent_references"| FE
+```
 
 ## Prerequisites
 
@@ -158,7 +213,7 @@ User authentication is handled by **App Service Easy Auth** with Microsoft Entra
 
 ## 概要
 
-エキスパート（Interviewee）の暗黙知を素人（Interviewer）が効果的に引き出すための AI 補助ツールです。
+エキスパート（Interviewee）の暗黙知をInterviewerが効果的に引き出すための AI 補助ツールです。
 
 - **リアルタイム文字起こし**: Azure Voice Live API（WebSocket 直接接続、日本語・英語対応）
 - **補足情報提示**: 会話の途切れを検出し、専門用語・技術概念を自動検索して素人向けに解説
@@ -180,6 +235,61 @@ User authentication is handled by **App Service Easy Auth** with Microsoft Entra
 | 認証 | Managed Identity (DefaultAzureCredential) |
 | ユーザー認証 | App Service Easy Auth (Microsoft Entra ID) |
 | インフラ | Bicep (New Foundry: CognitiveServices/accounts + projects) |
+
+```mermaid
+graph TB
+    subgraph Browser["ブラウザ (フロントエンド)"]
+        MIC["🎙️ マイク"]
+        VL_WS["Voice Live WebSocket"]
+        FE["フロントエンドアプリ<br/>app.js / ui.js / modal.js"]
+        BE_WS["バックエンド WebSocket"]
+    end
+
+    subgraph VoiceLive["Azure Voice Live API"]
+        VL_API["リアルタイム文字起こし<br/>wss://...voice-live/realtime"]
+    end
+
+    subgraph Backend["バックエンド (FastAPI / App Service)"]
+        AUTH["Easy Auth<br/>(Entra ID)"]
+        APP["FastAPI"]
+        R_VL["/api/voicelive/token"]
+        R_WS["/ws/interview/{id}"]
+        AGT_SVC["エージェントサービス"]
+        COS_SVC["Cosmos サービス"]
+        RPT_SVC["レポートサービス"]
+    end
+
+    subgraph AI["Azure AI Foundry"]
+        AGENT["Foundry Agent<br/>(GPT-4o + MCP)"]
+        MCP["Microsoft Learn<br/>MCP Server"]
+    end
+
+    subgraph DB["Azure Cosmos DB"]
+        COSMOS[("interviews / transcripts<br/>agent_responses / reports")]
+    end
+
+    MIC -->|"PCM16 音声"| VL_WS
+    VL_WS -->|"base64 音声"| VL_API
+    VL_API -->|"文字起こしテキスト"| VL_WS
+    VL_WS -->|"トランスクリプト"| FE
+
+    FE -->|"HTTP/WS"| AUTH
+    AUTH -->|"認証済み"| APP
+    APP --> R_VL
+    APP --> R_WS
+    R_VL -->|"Bearer トークン"| VL_WS
+
+    R_WS --> AGT_SVC
+    R_WS --> COS_SVC
+    RPT_SVC --> AGT_SVC
+    RPT_SVC --> COS_SVC
+
+    AGT_SVC -->|"Managed Identity"| AGENT
+    AGENT -->|"MCP プロトコル"| MCP
+    COS_SVC -->|"Managed Identity"| COSMOS
+
+    BE_WS -->|"agent_suggestion<br/>agent_references"| FE
+```
 
 ## 前提条件
 
