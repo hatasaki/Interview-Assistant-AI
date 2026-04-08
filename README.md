@@ -41,7 +41,6 @@ graph TB
     end
 
     subgraph Backend["Backend (FastAPI / App Service)"]
-        AUTH["Easy Auth<br/>(Entra ID)"]
         APP["FastAPI"]
         R_VL["/api/voicelive/token"]
         R_WS["/ws/interview/{id}"]
@@ -51,8 +50,17 @@ graph TB
     end
 
     subgraph AI["Azure AI Foundry"]
-        AGENT["Foundry Agent<br/>(GPT-4o + MCP)"]
+        AGENT["interview-assistant Agent<br/>(Prompt Agent / GPT-4o)"]
+        ROLE1["Role 1: Supplementary Info<br/>(5s silence → explain terms)"]
+        ROLE2["Role 2: Question Generation<br/>(button → suggest questions)"]
+        ROLE3["Role 3: Chat Q&A<br/>(user question → answer)"]
+        ROLE4["Role 4: Report Generation<br/>(direct model call → Markdown)"]
         MCP["Microsoft Learn<br/>MCP Server"]
+        AGENT --- ROLE1
+        AGENT --- ROLE2
+        AGENT --- ROLE3
+        AGENT --- ROLE4
+        AGENT -->|"MCP Protocol"| MCP
     end
 
     subgraph DB["Azure Cosmos DB"]
@@ -64,20 +72,18 @@ graph TB
     VL_API -->|"transcription text"| VL_WS
     VL_WS -->|"transcript"| FE
 
-    FE -->|"HTTP/WS"| AUTH
-    AUTH -->|"authenticated"| APP
+    FE -->|"HTTP/WS"| APP
     APP --> R_VL
     APP --> R_WS
-    R_VL -->|"Bearer Token"| VL_WS
+    R_VL --> VL_WS
 
     R_WS --> AGT_SVC
     R_WS --> COS_SVC
     RPT_SVC --> AGT_SVC
     RPT_SVC --> COS_SVC
 
-    AGT_SVC -->|"Managed Identity"| AGENT
-    AGENT -->|"MCP Protocol"| MCP
-    COS_SVC -->|"Managed Identity"| COSMOS
+    AGT_SVC --> AGENT
+    COS_SVC --> COSMOS
 
     BE_WS -->|"agent_suggestion<br/>agent_references"| FE
 ```
@@ -250,7 +256,6 @@ graph TB
     end
 
     subgraph Backend["バックエンド (FastAPI / App Service)"]
-        AUTH["Easy Auth<br/>(Entra ID)"]
         APP["FastAPI"]
         R_VL["/api/voicelive/token"]
         R_WS["/ws/interview/{id}"]
@@ -260,8 +265,17 @@ graph TB
     end
 
     subgraph AI["Azure AI Foundry"]
-        AGENT["Foundry Agent<br/>(GPT-4o + MCP)"]
+        AGENT["interview-assistant Agent<br/>(Prompt Agent / GPT-4o)"]
+        ROLE1["Role 1: 補足情報提供<br/>(5秒無音 → 用語解説)"]
+        ROLE2["Role 2: 質問生成<br/>(ボタン → 質問案提示)"]
+        ROLE3["Role 3: チャット Q&A<br/>(質問入力 → 回答)"]
+        ROLE4["Role 4: レポート生成<br/>(直接モデル呼出 → Markdown)"]
         MCP["Microsoft Learn<br/>MCP Server"]
+        AGENT --- ROLE1
+        AGENT --- ROLE2
+        AGENT --- ROLE3
+        AGENT --- ROLE4
+        AGENT -->|"MCP プロトコル"| MCP
     end
 
     subgraph DB["Azure Cosmos DB"]
@@ -273,20 +287,18 @@ graph TB
     VL_API -->|"文字起こしテキスト"| VL_WS
     VL_WS -->|"トランスクリプト"| FE
 
-    FE -->|"HTTP/WS"| AUTH
-    AUTH -->|"認証済み"| APP
+    FE -->|"HTTP/WS"| APP
     APP --> R_VL
     APP --> R_WS
-    R_VL -->|"Bearer トークン"| VL_WS
+    R_VL --> VL_WS
 
     R_WS --> AGT_SVC
     R_WS --> COS_SVC
     RPT_SVC --> AGT_SVC
     RPT_SVC --> COS_SVC
 
-    AGT_SVC -->|"Managed Identity"| AGENT
-    AGENT -->|"MCP プロトコル"| MCP
-    COS_SVC -->|"Managed Identity"| COSMOS
+    AGT_SVC --> AGENT
+    COS_SVC --> COSMOS
 
     BE_WS -->|"agent_suggestion<br/>agent_references"| FE
 ```
