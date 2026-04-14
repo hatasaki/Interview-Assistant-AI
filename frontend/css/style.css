@@ -250,6 +250,28 @@ button:disabled {
   margin-bottom: 8px;
 }
 
+.question-type-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 10px;
+  color: #fff;
+  vertical-align: middle;
+}
+
+.type-deepdive {
+  background-color: #2563eb;
+}
+
+.type-broaden {
+  background-color: #16a34a;
+}
+
+.type-challenge {
+  background-color: #dc2626;
+}
+
 .question-item .rationale {
   font-size: 12px;
   color: var(--color-text-muted);

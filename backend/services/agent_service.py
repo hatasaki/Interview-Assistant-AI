@@ -56,6 +56,7 @@ SYSTEM_PROMPT = """\
   "related_info": "入力に含まれる専門用語の補足説明。説明文中の専門用語や概念名にはマークダウン形式のリンクを埋め込むこと（例: [CAF](https://learn.microsoft.com/azure/cloud-adoption-framework/)）。なければ空文字列",
   "suggested_questions": [
     {
+      "type": "deepdive|broaden|challenge",
       "question": "会話の流れに基づく次の質問",
       "rationale": "なぜこの質問が重要か"
     }
@@ -490,7 +491,7 @@ def _parse_agent_response(raw: str) -> dict:
     return {
         "relatedInfo": data.get("related_info", ""),
         "suggestedQuestions": [
-            {"question": q.get("question", ""), "rationale": q.get("rationale", "")}
+            {"type": q.get("type", ""), "question": q.get("question", ""), "rationale": q.get("rationale", "")}
             for q in data.get("suggested_questions", [])
         ],
         "references": [

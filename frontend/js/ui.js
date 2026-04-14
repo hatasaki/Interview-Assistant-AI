@@ -65,8 +65,13 @@ export function displaySuggestion(data) {
     html += `<ul>`;
     for (const q of questions) {
       if (!q.question || !q.question.trim()) continue;
+      const typeLabel = q.type === "deepdive" ? t("questionTypeDeepdive")
+        : q.type === "broaden" ? t("questionTypeBroaden")
+        : q.type === "challenge" ? t("questionTypeChallenge")
+        : "";
+      const badge = typeLabel ? `<span class="question-type-badge type-${escapeHtml(q.type)}">${escapeHtml(typeLabel)}</span> ` : "";
       html += `<li class="question-item">
-        <strong>${escapeHtml(q.question)}</strong>
+        ${badge}<strong>${escapeHtml(q.question)}</strong>
         <div class="rationale">${escapeHtml(q.rationale || "")}</div>
       </li>`;
     }

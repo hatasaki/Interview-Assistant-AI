@@ -57,6 +57,7 @@ class ReportOut(BaseModel):
 
 
 class SuggestedQuestion(BaseModel):
+    type: str = ""
     question: str
     rationale: str
 

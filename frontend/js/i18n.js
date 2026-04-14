@@ -33,6 +33,9 @@ const translations = {
     affiliationLabel: "所属:",
     relatedInfoTitle: "関連情報",
     suggestedQuestionsTitle: "次の質問案",
+    questionTypeDeepdive: "深堀り",
+    questionTypeBroaden: "トピック拡張",
+    questionTypeChallenge: "挑戦的",
     chatCardTitle: "チャット",
 
     // Modal
@@ -79,6 +82,9 @@ const translations = {
     affiliationLabel: "Affiliation:",
     relatedInfoTitle: "Related Info",
     suggestedQuestionsTitle: "Suggested Questions",
+    questionTypeDeepdive: "Deep Dive",
+    questionTypeBroaden: "Broaden",
+    questionTypeChallenge: "Challenge",
     chatCardTitle: "Chat",
 
     // Modal

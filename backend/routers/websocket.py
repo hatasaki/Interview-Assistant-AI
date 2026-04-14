@@ -179,7 +179,11 @@ async def _handle_generate_questions(interview_id: str) -> None:
         f"## インタビュー情報\n{ctx}\n\n"
         f"## 直近の文字起こし履歴\n{transcript_text[-5000:]}\n\n"
         f"上記のインタビュー情報とゴール、文字起こし履歴に基づいて、"
-        f"次にInterviewerが聞くべき効果的な質問案を最大3個提示してください。"
+        f"次にInterviewerが聞くべき質問案を以下の3種類、各1個ずつ計3個提示してください。\n"
+        f"1. deepdive: 直前の発言を深堀りする質問（具体例や理由、詳細を掘り下げる）\n"
+        f"2. broaden: トピックを広げる質問（関連する別の観点や領域に話を展開する）\n"
+        f"3. challenge: 少し意地悪な質問（前提を疑う、矛盾を突く、例外ケースを問う）\n"
+        f"各質問のtypeフィールドに上記の種別（deepdive/broaden/challenge）を設定してください。"
         f"related_infoは空文字列にしてください。"
     )
     try:
