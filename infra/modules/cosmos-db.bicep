@@ -29,6 +29,9 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
       {
         name: 'EnableServerless'
       }
+      {
+        name: 'EnableNoSQLVectorSearch'
+      }
     ]
   }
 }
@@ -112,6 +115,11 @@ resource reportsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/co
     }
   }
 }
+
+// NOTE: interview_records container with vector embedding policy is created
+// by the post-provision script (create-vector-container) because the
+// EnableNoSQLVectorSearch capability requires up to 15 minutes to propagate
+// after account creation. Creating it inline would cause deployment failures.
 
 output accountName string = cosmosAccount.name
 output endpoint string = cosmosAccount.properties.documentEndpoint

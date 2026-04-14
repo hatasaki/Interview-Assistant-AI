@@ -4,5 +4,7 @@
   "resourcesResourceGroups": "rg-",
   "webServerFarms": "plan-",
   "webSitesAppService": "app-",
-  "storageAccounts": "st"
+  "storageAccounts": "st",
+  "functionApp": "func-",
+  "functionAppPlan": "fplan-"
 }

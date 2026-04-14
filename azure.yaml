@@ -33,6 +33,11 @@ services:
             cd ../backend
             cp -r ../frontend/dist/* static/
 
+  mcp-server:
+    project: ./mcp-server
+    language: python
+    host: function
+
 infra:
   provider: bicep
   path: infra

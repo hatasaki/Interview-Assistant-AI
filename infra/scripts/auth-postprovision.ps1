@@ -21,3 +21,6 @@ az ad app update `
 if ($LASTEXITCODE -ne 0) { throw "Failed to update redirect URI" }
 
 Write-Host "=== Redirect URI updated successfully ==="
+
+# Create the vector-enabled Cosmos DB container
+& "$PSScriptRoot/create-vector-container.ps1"

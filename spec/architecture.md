@@ -41,6 +41,11 @@ graph TB
         DB_AR["agent_responses"]
         DB_CM["chat_messages"]
         DB_RP["reports"]
+        DB_IR["interview_records<br/>(ベクトル検索対応)"]
+    end
+
+    subgraph Azure_Functions["Azure Functions (Flex Consumption)"]
+        MCP_SRV["MCP Server<br/>(ベクトル検索ツール)"]
     end
 
     MIC -->|"PCM audio"| AW
@@ -71,12 +76,15 @@ graph TB
     COS_SVC -->|"Managed Identity"| DB_AR
     COS_SVC -->|"Managed Identity"| DB_CM
     COS_SVC -->|"Managed Identity"| DB_RP
+    COS_SVC -->|"Managed Identity"| DB_IR
+    MCP_SRV -->|"Managed Identity"| DB_IR
 
     style Browser fill:#e1f5fe,stroke:#0288d1
     style Azure_VoiceLive fill:#fff3e0,stroke:#ef6c00
     style Backend fill:#e8f5e9,stroke:#2e7d32
     style Azure_AI fill:#f3e5f5,stroke:#7b1fa2
     style Azure_Cosmos fill:#fce4ec,stroke:#c62828
+    style Azure_Functions fill:#e0f2f1,stroke:#00695c
 ```
 
 ---
@@ -529,25 +537,27 @@ sequenceDiagram
     RPT->>DB: list_agent_responses(id)
     RPT->>DB: list_chat_messages(id)
 
-    Note over RPT,AGT: Step 1: 文字起こしノイズ除去
-    alt 推定トークン数 ≤ 100,000
-        RPT->>AGT: _denoise_chunk(全文)
-        AGT-->>RPT: クリーンテキスト
-    else 推定トークン数 > 100,000
-        RPT->>RPT: チャンク分割<br/>(90,000トークン/チャンク,<br/>10,000トークンオーバーラップ)
-        loop 各チャンク
-            RPT->>AGT: _denoise_chunk(チャンク)
-            AGT-->>RPT: クリーンテキスト
-        end
-    end
+    Note over RPT,AGT: Step 1: トランスクリプトキュレーション
+    RPT->>AGT: curate_transcript(transcripts)
+    Note right of AGT: ノイズ除去・重複コンテキスト排除<br/>（内容は保持）
+    AGT-->>RPT: キュレーション済みテキスト
 
-    Note over RPT,AGT: Step 2: レポート生成
+    Note over RPT,DB: Step 2: interview_records 保存
+    RPT->>DB: interview_records コンテナに保存<br/>(キュレーション結果 + インタビュー詳細)
+
+    Note over RPT,AGT: Step 3: レポート生成
     RPT->>RPT: 質問案を抽出<br/>(_extract_questions)
     RPT->>AGT: responses.create<br/>(model: gpt-4o,<br/>REPORT_PROMPT_TEMPLATE)
-    Note right of AGT: エージェント経由ではなく<br/>直接モデル呼び出し<br/>(Markdown出力のため)
+    Note right of AGT: エージェント経由ではなく<br/>直接モデル呼び出し<br/>(暗黙知・ノウハウ抽出に特化)
     AGT-->>RPT: Markdown レポート
 
     RPT->>DB: update_report<br/>(markdownContent, status=completed)
+    RPT->>DB: interview_records 更新<br/>(reportMarkdown 保存)
+
+    Note over RPT,AGT: Step 4: ベクトル化
+    RPT->>AGT: generate_embedding(text)<br/>(text-embedding-3-small)
+    AGT-->>RPT: embedding vector (1536次元)
+    RPT->>DB: interview_records 更新<br/>(embedding 保存)
 ```
 
 **トリガー**: `POST /api/interviews/{id}/stop` 呼び出し時の `BackgroundTasks`
@@ -849,10 +859,29 @@ erDiagram
         string completedAt "nullable"
     }
 
+    interview_records {
+        string id PK
+        string interviewId FK
+        string type "interview_record"
+        string intervieweeName
+        string intervieweeAffiliation
+        string relatedInfo
+        string goal
+        string interviewDate
+        string startTime
+        string endTime
+        string curatedTranscript
+        string reportMarkdown
+        array embedding "float32 x 1536"
+        string createdAt
+        string updatedAt
+    }
+
     interviews ||--o{ transcripts : "has many"
     interviews ||--o{ agent_responses : "has many"
     interviews ||--o{ chat_messages : "has many"
     interviews ||--o| reports : "has one"
+    interviews ||--o| interview_records : "has one (with vector)"
 ```
 
 全コンテナの **パーティションキー** は `/interviewId`。
@@ -874,7 +903,7 @@ graph TB
         subgraph AI["Azure AI Foundry"]
             AIF["AI Services<br/>(S0, AIServices kind)"]
             PROJ["Foundry Project"]
-            DEPLOY["Model Deployment<br/>(gpt-4o, GlobalStandard)"]
+            DEPLOY["Model Deployment<br/>(gpt-4o + text-embedding-3-small)"]
         end
 
         subgraph DB["Azure Cosmos DB"]
@@ -885,11 +914,19 @@ graph TB
             C3["agent_responses"]
             C4["chat_messages"]
             C5["reports"]
+            C6["interview_records<br/>(ベクトル検索対応)"]
+        end
+
+        subgraph FUNC["Azure Functions"]
+            FA["Function App (Flex Consumption)<br/>MCP Server"]
+            STOR["Storage Account"]
         end
     end
 
     WEB -->|"RBAC: Cosmos DB Built-in<br/>Data Contributor"| COSMOS
     WEB -->|"RBAC: Azure AI User +<br/>Cognitive Services User"| AIF
+    FA -->|"RBAC: Cosmos DB Built-in<br/>Data Contributor"| COSMOS
+    FA -->|"RBAC: Azure AI User"| AIF
 
     PLAN --> WEB
     AIF --> PROJ
@@ -900,6 +937,10 @@ graph TB
     COSMOS_DB --> C3
     COSMOS_DB --> C4
     COSMOS_DB --> C5
+    COSMOS_DB --> C6
+
+    FA -->|"RBAC: Cosmos DB Built-in<br/>Data Contributor"| COSMOS
+    FA -->|"RBAC: Azure AI User"| AIF
 
     style RG fill:#f5f5f5,stroke:#616161
     style AppService fill:#e8f5e9,stroke:#2e7d32

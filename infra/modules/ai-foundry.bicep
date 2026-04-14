@@ -13,6 +13,9 @@ param tags object = {}
 @description('Model for Foundry Agent')
 param agentModel string
 
+@description('Embedding model name')
+param embeddingModel string
+
 // ── New Foundry resource (Microsoft.CognitiveServices/accounts) ──
 // See: https://learn.microsoft.com/azure/foundry/how-to/create-resource-template
 resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
@@ -63,7 +66,26 @@ resource agentDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
   }
 }
 
+// ── Embedding model deployment ──
+resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+  parent: aiFoundry
+  name: embeddingModel
+  dependsOn: [agentDeployment]
+  sku: {
+    name: 'Standard'
+    capacity: 120
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: embeddingModel
+      version: '1'
+    }
+  }
+}
+
 output aiFoundryName string = aiFoundry.name
 output aiServicesEndpoint string = 'https://${aiFoundryResourceName}.services.ai.azure.com'
 output projectName string = aiProject.name
 output projectEndpoint string = 'https://${aiFoundryResourceName}.services.ai.azure.com/api/projects/${aiFoundryProjectName}'
+output embeddingModelName string = embeddingModel

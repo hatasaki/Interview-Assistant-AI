@@ -82,6 +82,8 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 | AI エージェント | Microsoft Foundry Agent Service（Prompt Agent） | `azure-ai-projects` >= 2.0.0 Python SDK |
 | エージェントツール | Microsoft Learn MCP Server | エンドポイント: `https://learn.microsoft.com/api/mcp`（認証不要）|
 | データストア | Azure Cosmos DB for NoSQL | Managed Identity 認証（`azure-cosmos`）|
+| Embedding | text-embedding-3-small | AI Foundry 経由でベクトル化 |
+| MCP Server | Azure Functions (Flex Consumption) | Cosmos DB ベクトル検索ツール提供 |
 | ホスティング | Azure App Service | Basic 認証無効（OIDC デプロイ） |
 | ユーザー認証 | App Service Easy Auth (Microsoft Entra ID) | `azd up` 時に自動構成 |
 | リソース間認証 | DefaultAzureCredential / ManagedIdentityCredential | 組織ポリシー準拠 |
@@ -94,7 +96,9 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 | App Service | フロントエンド静的ファイル配信 + Python バックエンド |
 | Microsoft Foundry リソース | Voice Live API エンドポイント + Foundry Agent Service（Prompt Agent）|
 | Foundry プロジェクト | エージェント管理。エンドポイント形式: `https://<resource>.ai.azure.com/api/projects/<project>` |
-| Cosmos DB for NoSQL | インタビューデータ永続化 |
+| Cosmos DB for NoSQL | インタビューデータ永続化 + ベクトル検索 |
+| Azure Functions (Flex Consumption) | MCP Server（インタビューデータのベクトル検索ツール提供） |
+| Storage Account | Function App デプロイメントストレージ |
 | Entra ID App Registration | App Service Easy Auth 用アプリ登録（`azd up` で自動作成） |
 
 ---
@@ -370,13 +374,29 @@ response = openai.responses.create(
 
 ### 4.5 最終レポート生成
 
-- インタビュー終了時に、レポート生成用エージェント（または同一エージェントへの特別プロンプト）を使用
+- インタビュー終了時に以下のフローで処理を実行:
+  1. **トランスクリプトキュレーション**: ノイズ除去・重複コンテキスト排除（内容は保持）
+  2. **Cosmos DB 保存**: キュレーション結果 + インタビュー詳細（対象者・所属・日時・開始/終了時間）を `interview_records` コンテナに保存
+  3. **レポート生成**: キュレーション済みテキストを用いてレポート生成エージェントがマークダウンレポートを生成
+  4. **ベクトル化**: キュレーション結果 + インタビュー詳細 + レポートを `text-embedding-3-small` でベクトル化し `interview_records` に保存
 - **入力**: Cosmos DB から全会話履歴 + エージェント提示内容 + インタビュー詳細情報を取得
-- **出力**: マークダウン形式のレポート
-- **処理方式**: 非同期実行（FastAPI の `BackgroundTasks` または別プロセス）
+- **出力**: マークダウン形式のレポート（エキスパートの暗黙知・ノウハウ抽出に特化）
+- **処理方式**: 非同期実行（FastAPI の `BackgroundTasks`）
 - レポート生成完了後、WebSocket で `report_ready` を送信し、左ペインの「レポート表示」ボタンがクリック可能
 - レポートは Cosmos DB に保存
 - 生成状況は `GET /api/interviews/{id}/report/status` でも確認可能
+
+#### MCP Server（ベクトル検索ツール）
+
+レポート生成後にベクトル化されたインタビューデータに対して、Azure Functions (Flex Consumption) ベースの MCP Server が 3 つのツールを提供:
+
+| ツール名 | 引数 | 応答 |
+|---|---|---|
+| `search_interviews` | `query` (string, 必須), `top_n` (number) | クエリをベクトル検索し、関連インタビューの対象者・所属・日時・開始時間・IDを返却 |
+| `get_interview_report` | `id` (string, 必須) | IDに対応するレポート + 対象者・所属・日時・開始/終了時間を返却 |
+| `get_interview_details` | `id` (string, 必須) | キュレーション結果・インタビュー詳細・日時・レポートの全情報を返却 |
+
+接続エンドポイント: `https://<function-app>.azurewebsites.net/runtime/webhooks/mcp`（Streamable HTTP）
 
 #### レポート構成（案）
 
@@ -514,6 +534,35 @@ response = openai.responses.create(
 }
 ```
 
+#### コンテナ: `interview_records`
+
+パーティションキー: `/interviewId`
+
+ベクトル検索対応コンテナ。レポート生成完了後にキュレーション結果・インタビュー詳細・レポート・ベクトルエンベディングを保存。MCP Serverがベクトル検索に使用。
+
+```json
+{
+  "id": "interviewId",
+  "interviewId": "uuid",
+  "type": "interview_record",
+  "intervieweeName": "対象者名",
+  "intervieweeAffiliation": "所属",
+  "relatedInfo": "関連情報",
+  "goal": "ゴール",
+  "interviewDate": "ISO 8601 datetime",
+  "startTime": "ISO 8601 datetime",
+  "endTime": "ISO 8601 datetime",
+  "curatedTranscript": "キュレーション済みトランスクリプト",
+  "reportMarkdown": "レポートのマークダウン",
+  "embedding": [0.123, -0.456, ...],
+  "createdAt": "ISO 8601 datetime",
+  "updatedAt": "ISO 8601 datetime"
+}
+```
+
+> **ベクトルインデックス**: `quantizedFlat` タイプ、cosine 距離、1536 次元（text-embedding-3-small）
+> **制約**: `EnableNoSQLVectorSearch` capability の有効化が必要（伝搬に最大15分）
+
 ### 5.2 Cosmos DB 接続
 
 - **認証**: Managed Identity（`DefaultAzureCredential`）
@@ -648,14 +697,21 @@ interview-assistant-ai/
 │   ├── scripts/
 │   │   ├── auth-preprovision.ps1      # Entra ID App Registration 作成 (Windows)
 │   │   ├── auth-preprovision.sh       # Entra ID App Registration 作成 (Linux/macOS)
-│   │   ├── auth-postprovision.ps1     # リダイレクト URI 設定 (Windows)
-│   │   └── auth-postprovision.sh      # リダイレクト URI 設定 (Linux/macOS)
+│   │   ├── auth-postprovision.ps1     # リダイレクト URI 設定 + ベクトルコンテナ作成 (Windows)
+│   │   ├── auth-postprovision.sh      # リダイレクト URI 設定 + ベクトルコンテナ作成 (Linux/macOS)
+│   │   ├── create-vector-container.ps1  # Cosmos DB ベクトルコンテナ作成（リトライ付き）
+│   │   └── create-vector-container.sh   # Cosmos DB ベクトルコンテナ作成（リトライ付き）
 │   └── modules/
 │       ├── app-service.bicep          # App Service + Plan + Easy Auth (authsettingsV2)
 │       ├── cosmos-db.bicep            # Cosmos DB + コンテナ
 │       ├── cosmos-rbac.bicep          # Cosmos DB RBAC
-│       ├── ai-foundry.bicep           # New Foundry (CognitiveServices/accounts + projects)
-│       └── ai-rbac.bicep              # AI Foundry RBAC
+│       ├── ai-foundry.bicep           # New Foundry + Embedding モデルデプロイ
+│       ├── ai-rbac.bicep              # AI Foundry RBAC
+│       └── function-app.bicep         # Azure Functions (Flex Consumption) MCP Server
+├── mcp-server/
+│   ├── function_app.py                # MCP ツールトリガー（3ツール）
+│   ├── host.json                      # Functions ホスト設定
+│   └── requirements.txt               # Python 依存パッケージ
 ├── azure.yaml                         # azd 構成（preprovision/postprovision/prepackage フック付き）
 └── README.md
 ```
@@ -685,6 +741,7 @@ websockets>=12.0
 azure-ai-projects>=2.0.0
 azure-identity>=1.17.0
 azure-cosmos>=4.7.0
+openai>=1.0.0
 pydantic>=2.0
 ```
 

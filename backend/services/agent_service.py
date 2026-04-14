@@ -9,7 +9,7 @@ from azure.ai.projects.models import MCPTool, PromptAgentDefinition
 from azure.identity import DefaultAzureCredential
 from openai import RateLimitError, APIStatusError
 
-from config import AGENT_NAME, AZURE_AI_PROJECT_ENDPOINT
+from config import AGENT_NAME, AZURE_AI_PROJECT_ENDPOINT, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +71,24 @@ SYSTEM_PROMPT = """\
 """
 
 REPORT_PROMPT_TEMPLATE = """\
-以下のインタビューの文字起こしデータからレポートを生成してください。
+以下のインタビューの文字起こしデータから、エキスパートの暗黙知・ノウハウを最大限に抽出したレポートを生成してください。
 
 ## 最重要ルール
 - レポートの内容は、必ず下記の「会話履歴」に記載された文字起こしの内容のみに基づくこと
 - 文字起こしに含まれていない情報を追加・捏造しないこと
-- 会話で言及されていない技術、製品、事例をレポートに含めないこと
-- 不明な点は「会話では言及されなかった」と記載すること
+- エキスパートが「当たり前」と思って簡潔に語った部分こそ、暗黙知の宝庫である。そこを深く掘り下げて詳細に記述すること
+- 具体的な数値、手順、判断基準、例外処理、失敗談、成功パターンは一つも漏らさず記録すること
+
+## 暗黙知抽出の観点
+以下の観点でエキスパートの発言を分析し、暗黙知を抽出すること:
+1. **判断基準・意思決定ロジック**: 「なぜそうするのか」「どういう時にそう判断するのか」の基準
+2. **手順・プロセスの詳細**: 表には出ない実際のワークフロー、ショートカット、手順の省略
+3. **例外・エッジケース対応**: 通常と異なるケースでの対処法、トラブルシューティング
+4. **経験則・ヒューリスティクス**: 「経験上こうするとうまくいく」「こういう場合は要注意」
+5. **失敗から得た教訓**: 過去の失敗経験とそこから学んだこと
+6. **暗黙の前提条件**: エキスパートが当然と思っているが初心者が見落とす前提
+7. **人脈・リソースの活用法**: 誰に聞くべきか、どこを見るべきかの知識
+8. **用語・概念の実務的意味**: 教科書的定義と実務での使い方の違い
 
 ## 基本情報
 - 対象者: {name} ({affiliation})
@@ -91,7 +102,7 @@ REPORT_PROMPT_TEMPLATE = """\
 {questions}
 
 ## 出力形式
-以下のマークダウン形式でレポートを出力してください。各セクションの内容は必ず上記の会話履歴から抽出すること:
+以下のマークダウン形式でレポートを出力してください。各セクションは可能な限り詳細に、エキスパートの発言をできるだけ具体的に引用・再現して記述すること:
 
 # インタビューレポート
 
@@ -102,17 +113,34 @@ REPORT_PROMPT_TEMPLATE = """\
 - インタビューゴール: (ゴール)
 
 ## エグゼクティブサマリー
-(会話内容の要約。会話に含まれる内容のみ)
+(会話全体から得られた最も重要な知見を3〜5文で要約)
 
-## 主要な知見
-### 知見 1: (タイトル)
-(会話から得られた具体的な知見の詳細)
+## エキスパートの暗黙知・ノウハウ
+### 1. (テーマ)
+- **概要**: (このテーマに関してエキスパートが語った内容の要約)
+- **具体的なノウハウ**: (実務で使える具体的な手法・プロセス・判断基準を箇条書きで詳述)
+- **エキスパートの発言**: 「(関連する重要な発言を引用)」
+- **暗黙の前提・注意点**: (初心者が見落としやすいポイント)
+
+(会話から抽出できるテーマの数だけ繰り返す)
+
+## 判断基準・意思決定フレームワーク
+(エキスパートが示した判断基準、条件分岐、優先順位の考え方をフローチャート的に記述)
+
+## 具体的な事例・エピソード
+(会話の中で語られた具体事例、成功/失敗体験を詳しく記述)
+
+## 主要な技術的知見
+(技術的な詳細、アーキテクチャ、ツール選定の理由など)
 
 ## 会話ハイライト
-(会話の中で特に重要だった発言や議論のポイント)
+(会話の中で特に重要だった発言や議論のポイントを引用付きで記録)
 
 ## 今後のアクション・推奨事項
-(会話の中で言及された次のステップや課題)
+(会話の中で言及された次のステップ、課題、推奨事項)
+
+## 追加調査が必要な領域
+(インタビューで深掘りしきれなかった、または追加確認が必要なトピック)
 """
 
 ENGLISH_OUTPUT_INSTRUCTION = (
@@ -123,13 +151,24 @@ ENGLISH_OUTPUT_INSTRUCTION = (
 )
 
 REPORT_PROMPT_TEMPLATE_EN = """\
-Generate a report from the following interview transcript data.
+Generate a report from the following interview transcript, extracting the expert's tacit knowledge and know-how as thoroughly as possible.
 
 ## Most Important Rules
 - The report content MUST be based solely on the transcript in the "Conversation History" section below
 - Do NOT add or fabricate information not contained in the transcript
-- Do NOT include technologies, products, or examples not mentioned in the conversation
-- For unclear points, state "This was not discussed in the conversation"
+- Parts where the expert speaks briefly about things they consider "obvious" are treasure troves of tacit knowledge. Dig deep and describe them in detail
+- Record every specific number, procedure, decision criterion, exception handling, failure story, and success pattern without omission
+
+## Tacit Knowledge Extraction Perspectives
+Analyze the expert's statements from these perspectives:
+1. **Decision Criteria & Logic**: Criteria for "why do it that way" and "when to make that judgment"
+2. **Detailed Processes & Workflows**: Actual workflows, shortcuts, and step omissions not publicly documented
+3. **Exception & Edge Case Handling**: How to deal with unusual cases, troubleshooting approaches
+4. **Heuristics & Rules of Thumb**: "In my experience, this works well" / "Watch out in these cases"
+5. **Lessons from Failures**: Past failures and lessons learned
+6. **Implicit Assumptions**: Assumptions experts take for granted but beginners miss
+7. **Network & Resource Utilization**: Who to ask, where to look
+8. **Practical Meaning of Terms**: Differences between textbook definitions and practical usage
 
 ## Basic Information
 - Interviewee: {name} ({affiliation})
@@ -143,7 +182,7 @@ Generate a report from the following interview transcript data.
 {questions}
 
 ## Output Format
-Output the report in the following markdown format. All section content must be extracted from the conversation history above:
+Output the report in the following markdown format. Each section should be as detailed as possible, quoting and reproducing the expert's statements as specifically as possible:
 
 # Interview Report
 
@@ -154,17 +193,53 @@ Output the report in the following markdown format. All section content must be 
 - Interview Goal: (Goal)
 
 ## Executive Summary
-(Summary of the conversation content. Only content from the conversation.)
+(Summarize the most important findings from the entire conversation in 3-5 sentences)
 
-## Key Findings
-### Finding 1: (Title)
-(Details of specific findings obtained from the conversation)
+## Expert Tacit Knowledge & Know-How
+### 1. (Theme)
+- **Overview**: (Summary of what the expert discussed on this theme)
+- **Specific Know-How**: (Practical methods, processes, and decision criteria in bullet points)
+- **Expert Quote**: "(Quote relevant important statements)"
+- **Implicit Assumptions & Caveats**: (Points beginners tend to miss)
+
+(Repeat for each theme extracted from the conversation)
+
+## Decision Criteria & Decision-Making Framework
+(Describe decision criteria, conditional branching, and prioritization approaches shown by the expert)
+
+## Specific Cases & Episodes
+(Detailed descriptions of specific cases, success/failure experiences discussed in the conversation)
+
+## Key Technical Findings
+(Technical details, architecture, tool selection rationale, etc.)
 
 ## Conversation Highlights
-(Key statements and discussion points from the conversation)
+(Important statements and discussion points from the conversation with quotes)
 
 ## Future Actions & Recommendations
-(Next steps and issues mentioned in the conversation)
+(Next steps, issues, and recommendations mentioned in the conversation)
+
+## Areas Requiring Further Investigation
+(Topics not fully explored or requiring additional confirmation)
+"""
+
+CURATION_PROMPT = """\
+以下のインタビュー文字起こしデータをキュレーションしてください。
+
+## 最重要ルール
+- トランスクリプトの内容（発言の意味・情報）は一切失わないこと
+- 以下のノイズのみを除去すること:
+  - フィラー（えー、あの、うーん、えっと等）
+  - 意味のない繰り返し・言い直し（同じ内容の重複表現）
+  - 音声認識の誤認識と思われる意味不明な文字列
+  - 重複するコンテキスト（同じ話題が繰り返されている場合は1回にまとめる）
+- 発言者の区別がある場合はそのまま保持すること
+- タイムスタンプがある場合は保持すること
+- 会話の流れ・順序はそのまま維持すること
+
+## 出力
+- クリーンアップされたテキストのみを出力すること
+- 説明や注釈は一切不要
 """
 
 TOKEN_LIMIT = 100_000
@@ -241,15 +316,18 @@ def generate_report(
     agent_responses: list[dict],
     chat_messages: list[dict],
     lang: str = "ja",
+    curated_transcript: str | None = None,
 ) -> str:
     """Generate a markdown report with preprocessing to fit context window."""
-    # 1. Build raw transcript text
-    transcript_text = "\n".join(
-        f"[{t.get('timestamp', '')}] {t.get('text', '')}" for t in transcripts
-    )
-
-    # 2. Denoise transcript if too large
-    transcript_text = _denoise_transcript(transcript_text)
+    # 1. Use curated transcript if provided, otherwise build from raw transcripts
+    if curated_transcript:
+        transcript_text = curated_transcript
+    else:
+        transcript_text = "\n".join(
+            f"[{t.get('timestamp', '')}] {t.get('text', '')}" for t in transcripts
+        )
+        # Denoise transcript if too large
+        transcript_text = _denoise_transcript(transcript_text)
 
     # 3. Extract only questions from agent responses (drop relatedInfo)
     questions = _extract_questions(agent_responses)
@@ -273,6 +351,58 @@ def generate_report(
     ))
 
     return response.output_text
+
+
+def curate_transcript(transcripts: list[dict]) -> str:
+    """Curate transcripts: remove noise and duplicate context while preserving content."""
+    transcript_text = "\n".join(
+        f"[{t.get('timestamp', '')}] {t.get('text', '')}" for t in transcripts
+    )
+    if not transcript_text:
+        return ""
+
+    estimated = _estimate_tokens(transcript_text)
+    if estimated <= TOKEN_LIMIT:
+        return _curate_chunk(transcript_text)
+
+    # Chunk large transcripts
+    chunk_chars = CHUNK_SIZE * 3
+    overlap_chars = OVERLAP * 3
+    chunks = []
+    start = 0
+    while start < len(transcript_text):
+        end = start + chunk_chars
+        chunks.append(transcript_text[start:end])
+        start = end - overlap_chars
+
+    logger.info("Transcript too large (%d est. tokens), splitting into %d chunks for curation", estimated, len(chunks))
+
+    curated_parts = []
+    for i, chunk in enumerate(chunks):
+        logger.info("Curating chunk %d/%d", i + 1, len(chunks))
+        curated_parts.append(_curate_chunk(chunk))
+
+    return "\n".join(curated_parts)
+
+
+def _curate_chunk(text: str) -> str:
+    """Use LLM to curate a transcript chunk."""
+    openai = _get_openai()
+    response = _call_with_retry(lambda: openai.responses.create(
+        model="gpt-4o",
+        input=f"{CURATION_PROMPT}\n\n{text}",
+    ))
+    return response.output_text
+
+
+def generate_embedding(text: str) -> list[float]:
+    """Generate embedding vector for the given text using the embedding model."""
+    openai = _get_openai()
+    response = _call_with_retry(lambda: openai.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=text,
+    ))
+    return response.data[0].embedding
 
 
 def _estimate_tokens(text: str) -> int:

@@ -22,6 +22,9 @@ param voiceLiveEndpoint string
 @description('Voice Live model name')
 param voiceLiveModel string
 
+@description('Embedding model name')
+param embeddingModel string
+
 @description('Entra ID App Registration client ID for Easy Auth')
 param authClientId string = ''
 
@@ -77,6 +80,10 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'AZURE_VOICELIVE_MODEL'
           value: voiceLiveModel
+        }
+        {
+          name: 'AZURE_EMBEDDING_MODEL'
+          value: embeddingModel
         }
         {
           name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'

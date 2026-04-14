@@ -146,3 +146,28 @@ def new_report_doc(interview_id: str) -> dict:
         "createdAt": _utcnow(),
         "completedAt": None,
     }
+
+
+def new_interview_record_doc(
+    interview_id: str,
+    curated_transcript: str,
+    interview: dict,
+    report_markdown: str,
+) -> dict:
+    return {
+        "id": interview_id,
+        "interviewId": interview_id,
+        "type": "interview_record",
+        "intervieweeName": interview.get("intervieweeName", ""),
+        "intervieweeAffiliation": interview.get("intervieweeAffiliation", ""),
+        "relatedInfo": interview.get("relatedInfo", ""),
+        "goal": interview.get("goal", ""),
+        "interviewDate": interview.get("createdAt", ""),
+        "startTime": interview.get("startedAt", ""),
+        "endTime": interview.get("endedAt", ""),
+        "curatedTranscript": curated_transcript,
+        "reportMarkdown": report_markdown,
+        "embedding": [],
+        "createdAt": _utcnow(),
+        "updatedAt": _utcnow(),
+    }

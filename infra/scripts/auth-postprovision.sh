@@ -26,3 +26,7 @@ az ad app update \
     --enable-id-token-issuance true
 
 echo "=== Redirect URI updated successfully ==="
+
+# Create the vector-enabled Cosmos DB container
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+"$SCRIPT_DIR/create-vector-container.sh"

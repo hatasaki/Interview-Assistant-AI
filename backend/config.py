@@ -8,4 +8,5 @@ AZURE_VOICELIVE_MODEL: str = os.environ.get("AZURE_VOICELIVE_MODEL", "gpt-4o-min
 
 COSMOS_DATABASE_NAME: str = "interview-assistant-db"
 AGENT_NAME: str = "interview-assistant"
+EMBEDDING_MODEL: str = os.environ.get("AZURE_EMBEDDING_MODEL", "text-embedding-3-small")
 VOICELIVE_TOKEN_SCOPE: str = "https://cognitiveservices.azure.com/.default"

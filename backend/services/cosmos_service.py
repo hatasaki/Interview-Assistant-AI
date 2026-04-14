@@ -119,3 +119,24 @@ def get_report(interview_id: str) -> dict | None:
 def update_report(doc: dict) -> dict:
     container = _get_container("reports")
     return container.upsert_item(body=doc)
+
+
+# ── Interview Records (with vector embeddings) ──
+
+
+def create_interview_record(doc: dict) -> dict:
+    container = _get_container("interview_records")
+    return container.create_item(body=doc)
+
+
+def update_interview_record(doc: dict) -> dict:
+    container = _get_container("interview_records")
+    return container.upsert_item(body=doc)
+
+
+def get_interview_record(interview_id: str) -> dict | None:
+    container = _get_container("interview_records")
+    try:
+        return container.read_item(item=interview_id, partition_key=interview_id)
+    except Exception:
+        return None
