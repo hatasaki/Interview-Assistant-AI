@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from routers import interviews, voicelive, websocket
+from routers import interviews, speech, websocket
 from services import agent_service
 
 logging.basicConfig(level=logging.INFO)
@@ -35,7 +35,7 @@ app = FastAPI(title="Interview Assistant AI", lifespan=lifespan)
 
 # Routers
 app.include_router(interviews.router)
-app.include_router(voicelive.router)
+app.include_router(speech.router)
 app.include_router(websocket.router)
 
 # Serve frontend static files (built by Vite into backend/static/)

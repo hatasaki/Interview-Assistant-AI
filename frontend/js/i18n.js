@@ -51,6 +51,7 @@ const translations = {
 
     // Messages
     voiceLiveError: "Voice Live 接続エラー: ",
+    speechError: "音声認識エラー: ",
     startFailed: "開始に失敗しました: ",
   },
   en: {
@@ -100,6 +101,7 @@ const translations = {
 
     // Messages
     voiceLiveError: "Voice Live connection error: ",
+    speechError: "Speech recognition error: ",
     startFailed: "Failed to start: ",
   },
 };

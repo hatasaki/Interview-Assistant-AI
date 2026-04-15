@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.40.2.10011",
-      "templateHash": "4829527644717828245"
+      "templateHash": "9092718752608238363"
     }
   },
   "parameters": {
@@ -38,18 +38,32 @@
         "description": "Name of the AI Foundry project (leave empty for auto-generated)"
       }
     },
-    "voiceLiveModel": {
-      "type": "string",
-      "defaultValue": "gpt-4o-mini",
-      "metadata": {
-        "description": "Model deployment name for Voice Live API"
-      }
-    },
     "agentModel": {
       "type": "string",
       "defaultValue": "gpt-4o",
       "metadata": {
         "description": "Model deployment name for Foundry Agent"
+      }
+    },
+    "embeddingModel": {
+      "type": "string",
+      "defaultValue": "text-embedding-3-small",
+      "metadata": {
+        "description": "Embedding model name"
+      }
+    },
+    "authClientId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Entra ID App Registration client ID for Easy Auth"
+      }
+    },
+    "authClientSecret": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Entra ID App Registration client secret for Easy Auth"
       }
     }
   },
@@ -60,7 +74,9 @@
       "resourcesResourceGroups": "rg-",
       "webServerFarms": "plan-",
       "webSitesAppService": "app-",
-      "storageAccounts": "st"
+      "storageAccounts": "st",
+      "functionApp": "func-",
+      "functionAppPlan": "fplan-"
     },
     "abbrs": "[variables('$fxv#0')]",
     "resourceToken": "[toLower(uniqueString(subscription().id, parameters('environmentName'), parameters('location')))]",
@@ -104,7 +120,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.40.2.10011",
-              "templateHash": "391398117510583536"
+              "templateHash": "1254897011868958599"
             }
           },
           "parameters": {
@@ -148,9 +164,13 @@
                   "defaultConsistencyLevel": "Session"
                 },
                 "disableLocalAuth": true,
+                "publicNetworkAccess": "Enabled",
                 "capabilities": [
                   {
                     "name": "EnableServerless"
+                  },
+                  {
+                    "name": "EnableNoSQLVectorSearch"
                   }
                 ]
               }
@@ -301,6 +321,9 @@
           },
           "agentModel": {
             "value": "[parameters('agentModel')]"
+          },
+          "embeddingModel": {
+            "value": "[parameters('embeddingModel')]"
           }
         },
         "template": {
@@ -310,7 +333,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.40.2.10011",
-              "templateHash": "8736004885092132796"
+              "templateHash": "17610243626361269624"
             }
           },
           "parameters": {
@@ -343,6 +366,12 @@
               "type": "string",
               "metadata": {
                 "description": "Model for Foundry Agent"
+              }
+            },
+            "embeddingModel": {
+              "type": "string",
+              "metadata": {
+                "description": "Embedding model name"
               }
             }
           },
@@ -387,7 +416,7 @@
               "name": "[format('{0}/{1}', parameters('aiFoundryResourceName'), parameters('agentModel'))]",
               "sku": {
                 "name": "GlobalStandard",
-                "capacity": 1
+                "capacity": 30
               },
               "properties": {
                 "model": {
@@ -397,6 +426,26 @@
                 }
               },
               "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryResourceName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.CognitiveServices/accounts/deployments",
+              "apiVersion": "2025-06-01",
+              "name": "[format('{0}/{1}', parameters('aiFoundryResourceName'), parameters('embeddingModel'))]",
+              "sku": {
+                "name": "Standard",
+                "capacity": 120
+              },
+              "properties": {
+                "model": {
+                  "format": "OpenAI",
+                  "name": "[parameters('embeddingModel')]",
+                  "version": "1"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts/deployments', parameters('aiFoundryResourceName'), parameters('agentModel'))]",
                 "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryResourceName'))]"
               ]
             }
@@ -417,6 +466,10 @@
             "projectEndpoint": {
               "type": "string",
               "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', parameters('aiFoundryResourceName'), parameters('aiFoundryProjectName'))]"
+            },
+            "embeddingModelName": {
+              "type": "string",
+              "value": "[parameters('embeddingModel')]"
             }
           }
         }
@@ -454,11 +507,17 @@
           "aiFoundryEndpoint": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.projectEndpoint.value]"
           },
-          "voiceLiveEndpoint": {
+          "speechEndpoint": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.aiServicesEndpoint.value]"
           },
-          "voiceLiveModel": {
-            "value": "[parameters('voiceLiveModel')]"
+          "embeddingModel": {
+            "value": "[parameters('embeddingModel')]"
+          },
+          "authClientId": {
+            "value": "[parameters('authClientId')]"
+          },
+          "authClientSecret": {
+            "value": "[parameters('authClientSecret')]"
           }
         },
         "template": {
@@ -468,7 +527,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.40.2.10011",
-              "templateHash": "260231880271780502"
+              "templateHash": "16852225211422798264"
             }
           },
           "parameters": {
@@ -509,16 +568,30 @@
                 "description": "AI Foundry project endpoint"
               }
             },
-            "voiceLiveEndpoint": {
+            "speechEndpoint": {
               "type": "string",
               "metadata": {
-                "description": "Voice Live API endpoint"
+                "description": "Azure Speech Service endpoint"
               }
             },
-            "voiceLiveModel": {
+            "embeddingModel": {
               "type": "string",
               "metadata": {
-                "description": "Voice Live model name"
+                "description": "Embedding model name"
+              }
+            },
+            "authClientId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Entra ID App Registration client ID for Easy Auth"
+              }
+            },
+            "authClientSecret": {
+              "type": "securestring",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Entra ID App Registration client secret for Easy Auth"
               }
             }
           },
@@ -553,7 +626,7 @@
                 "siteConfig": {
                   "linuxFxVersion": "PYTHON|3.12",
                   "ftpsState": "Disabled",
-                  "appCommandLine": "pip install -r requirements.txt && uvicorn app:app --host 0.0.0.0 --port 8000",
+                  "appCommandLine": "bash startup.sh",
                   "appSettings": [
                     {
                       "name": "AZURE_COSMOS_DB_ENDPOINT",
@@ -564,12 +637,12 @@
                       "value": "[parameters('aiFoundryEndpoint')]"
                     },
                     {
-                      "name": "AZURE_VOICELIVE_ENDPOINT",
-                      "value": "[parameters('voiceLiveEndpoint')]"
+                      "name": "AZURE_SPEECH_ENDPOINT",
+                      "value": "[parameters('speechEndpoint')]"
                     },
                     {
-                      "name": "AZURE_VOICELIVE_MODEL",
-                      "value": "[parameters('voiceLiveModel')]"
+                      "name": "AZURE_EMBEDDING_MODEL",
+                      "value": "[parameters('embeddingModel')]"
                     },
                     {
                       "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
@@ -578,6 +651,14 @@
                     {
                       "name": "WEBSITES_PORT",
                       "value": "8000"
+                    },
+                    {
+                      "name": "WEBSITES_CONTAINER_START_TIME_LIMIT",
+                      "value": "600"
+                    },
+                    {
+                      "name": "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET",
+                      "value": "[parameters('authClientSecret')]"
                     }
                   ],
                   "webSocketsEnabled": true
@@ -608,6 +689,52 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Web/sites', parameters('name'))]"
               ]
+            },
+            {
+              "condition": "[not(empty(parameters('authClientId')))]",
+              "type": "Microsoft.Web/sites/config",
+              "apiVersion": "2023-12-01",
+              "name": "[format('{0}/{1}', parameters('name'), 'authsettingsV2')]",
+              "properties": {
+                "globalValidation": {
+                  "requireAuthentication": true,
+                  "unauthenticatedClientAction": "RedirectToLoginPage",
+                  "redirectToProvider": "azureactivedirectory"
+                },
+                "httpSettings": {
+                  "requireHttps": true,
+                  "forwardProxy": {
+                    "convention": "NoProxy"
+                  }
+                },
+                "identityProviders": {
+                  "azureActiveDirectory": {
+                    "enabled": true,
+                    "registration": {
+                      "clientId": "[parameters('authClientId')]",
+                      "clientSecretSettingName": "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET",
+                      "openIdIssuer": "[format('{0}{1}/v2.0', environment().authentication.loginEndpoint, tenant().tenantId)]"
+                    },
+                    "validation": {
+                      "allowedAudiences": [
+                        "[format('api://{0}', parameters('authClientId'))]"
+                      ]
+                    }
+                  }
+                },
+                "login": {
+                  "tokenStore": {
+                    "enabled": true
+                  }
+                },
+                "platform": {
+                  "enabled": true,
+                  "runtimeVersion": "~1"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+              ]
             }
           ],
           "outputs": {
@@ -622,6 +749,301 @@
             "identityPrincipalId": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2023-12-01', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "mcp-function-app",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').functionApp, variables('resourceToken'))]"
+          },
+          "planName": {
+            "value": "[format('{0}{1}', variables('abbrs').functionAppPlan, variables('resourceToken'))]"
+          },
+          "storageName": {
+            "value": "[format('{0}{1}', variables('abbrs').storageAccounts, variables('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "cosmosDbAccountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db'), '2025-04-01').outputs.accountName.value]"
+          },
+          "aiFoundryEndpoint": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.projectEndpoint.value]"
+          },
+          "embeddingModel": {
+            "value": "[parameters('embeddingModel')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.40.2.10011",
+              "templateHash": "14100801975291261185"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string",
+              "metadata": {
+                "description": "Function App name"
+              }
+            },
+            "planName": {
+              "type": "string",
+              "metadata": {
+                "description": "App Service Plan name for Flex Consumption"
+              }
+            },
+            "storageName": {
+              "type": "string",
+              "metadata": {
+                "description": "Storage account name"
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Location"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags"
+              }
+            },
+            "cosmosDbAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Cosmos DB account name"
+              }
+            },
+            "aiFoundryEndpoint": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Foundry project endpoint"
+              }
+            },
+            "embeddingModel": {
+              "type": "string",
+              "metadata": {
+                "description": "Embedding model name"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[parameters('storageName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "supportsHttpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": false,
+                "allowSharedKeyAccess": false
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', parameters('storageName'), 'default')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', parameters('storageName'), 'default', format('app-package-{0}', take(parameters('name'), 32)))]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageName'), 'default')]"
+              ]
+            },
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2024-04-01",
+              "name": "[parameters('planName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "tier": "FlexConsumption",
+                "name": "FC1"
+              },
+              "kind": "functionapp",
+              "properties": {
+                "reserved": true
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2024-04-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'mcp-server'))]",
+              "kind": "functionapp,linux",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
+                "httpsOnly": true,
+                "functionAppConfig": {
+                  "deployment": {
+                    "storage": {
+                      "type": "blobContainer",
+                      "value": "[format('{0}app-package-{1}', reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageName')), '2023-05-01').primaryEndpoints.blob, take(parameters('name'), 32))]",
+                      "authentication": {
+                        "type": "SystemAssignedIdentity"
+                      }
+                    }
+                  },
+                  "runtime": {
+                    "name": "python",
+                    "version": "3.11"
+                  },
+                  "scaleAndConcurrency": {
+                    "maximumInstanceCount": 100,
+                    "instanceMemoryMB": 2048
+                  }
+                },
+                "siteConfig": {
+                  "alwaysOn": false
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Web/sites/config",
+              "apiVersion": "2024-04-01",
+              "name": "[format('{0}/{1}', parameters('name'), 'appsettings')]",
+              "properties": {
+                "AzureWebJobsStorage__credential": "managedidentity",
+                "AzureWebJobsStorage__blobServiceUri": "[format('https://{0}.blob.{1}', parameters('storageName'), environment().suffixes.storage)]",
+                "AzureWebJobsStorage__queueServiceUri": "[format('https://{0}.queue.{1}', parameters('storageName'), environment().suffixes.storage)]",
+                "AzureWebJobsStorage__tableServiceUri": "[format('https://{0}.table.{1}', parameters('storageName'), environment().suffixes.storage)]",
+                "AZURE_COSMOS_DB_ENDPOINT": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName')), '2024-05-15').documentEndpoint]",
+                "AZURE_AI_PROJECT_ENDPOINT": "[parameters('aiFoundryEndpoint')]",
+                "AZURE_EMBEDDING_MODEL": "[parameters('embeddingModel')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+              "apiVersion": "2023-12-01",
+              "name": "[format('{0}/{1}', parameters('name'), 'scm')]",
+              "properties": {
+                "allow": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+              "apiVersion": "2023-12-01",
+              "name": "[format('{0}/{1}', parameters('name'), 'ftp')]",
+              "properties": {
+                "allow": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageName')), resourceId('Microsoft.Web/sites', parameters('name')), 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageName')), resourceId('Microsoft.Web/sites', parameters('name')), '974c5e8b-45b9-4653-ba55-5f855dd0fb88')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageName')), resourceId('Microsoft.Web/sites', parameters('name')), '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('name'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            },
+            "url": {
+              "type": "string",
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01').defaultHostName)]"
+            },
+            "identityPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]"
             }
           }
         }
@@ -767,6 +1189,142 @@
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-service')]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName')))]"
       ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "mcp-cosmos-rbac",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "cosmosDbAccountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db'), '2025-04-01').outputs.accountName.value]"
+          },
+          "principalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'mcp-function-app'), '2025-04-01').outputs.identityPrincipalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.40.2.10011",
+              "templateHash": "9921253535160153382"
+            }
+          },
+          "parameters": {
+            "cosmosDbAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Cosmos DB account name"
+              }
+            },
+            "principalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Principal ID to assign the role to"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', parameters('cosmosDbAccountName'), guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName')), parameters('principalId'), '00000000-0000-0000-0000-000000000002'))]",
+              "properties": {
+                "roleDefinitionId": "[format('{0}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002', resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName')))]",
+                "principalId": "[parameters('principalId')]",
+                "scope": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('cosmosDbAccountName'))]"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'mcp-function-app')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "mcp-ai-foundry-rbac",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "aiFoundryResourceName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.aiFoundryName.value]"
+          },
+          "principalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'mcp-function-app'), '2025-04-01').outputs.identityPrincipalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.40.2.10011",
+              "templateHash": "8469620823267360756"
+            }
+          },
+          "parameters": {
+            "aiFoundryResourceName": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Foundry resource name"
+              }
+            },
+            "principalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Principal ID to assign roles to"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryResourceName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryResourceName')), parameters('principalId'), 'a97b65f3-24c7-4388-baec-2e87135dc908')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryResourceName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryResourceName')), parameters('principalId'), '53ca6127-db72-4b80-b1b0-d745d6d5456d')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'mcp-function-app')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName')))]"
+      ]
     }
   ],
   "outputs": {
@@ -782,13 +1340,13 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.projectEndpoint.value]"
     },
-    "AZURE_VOICELIVE_ENDPOINT": {
+    "AZURE_SPEECH_ENDPOINT": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.aiServicesEndpoint.value]"
     },
-    "AZURE_VOICELIVE_MODEL": {
+    "AZURE_EMBEDDING_MODEL": {
       "type": "string",
-      "value": "[parameters('voiceLiveModel')]"
+      "value": "[parameters('embeddingModel')]"
     },
     "AZURE_WEBAPP_NAME": {
       "type": "string",
@@ -797,6 +1355,14 @@
     "AZURE_WEBAPP_URL": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-service'), '2025-04-01').outputs.url.value]"
+    },
+    "AZURE_MCP_FUNCTION_NAME": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'mcp-function-app'), '2025-04-01').outputs.name.value]"
+    },
+    "AZURE_MCP_FUNCTION_URL": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'mcp-function-app'), '2025-04-01').outputs.url.value]"
     }
   }
 }

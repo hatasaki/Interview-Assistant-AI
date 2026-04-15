@@ -6,7 +6,7 @@ A browser-based interview assistant web application. It supports the Interviewer
 
 An AI-powered tool designed to help an Interviewer effectively elicit tacit knowledge from an expert Interviewee.
 
-- **Real-time Transcription**: Azure Voice Live API (direct WebSocket connection, Japanese/English support
+- **Real-time Transcription**: Azure AI Speech SDK (continuous recognition, Japanese/English support)
 - **Supplementary Information**: Detects pauses in conversation, automatically searches for technical terms and concepts, and provides beginner-friendly explanations
 - **Question Generation**: Suggests effective next questions based on transcript history at the click of a button
 - **Chat Q&A**: The Interviewer can ask the AI questions in real time
@@ -20,7 +20,7 @@ An AI-powered tool designed to help an Interviewer effectively elicit tacit know
 |---|---|
 | Frontend | JavaScript (Vanilla JS) + Vite |
 | Backend | Python (FastAPI) on Azure App Service |
-| Real-time Transcription | Azure Voice Live API (direct WebSocket connection) |
+| Real-time Transcription | Azure AI Speech SDK (continuous recognition) |
 | AI Agent | Microsoft Foundry Agent Service (azure-ai-projects v2) |
 | Agent Tool | Microsoft Learn MCP Server |
 | Data Store | Azure Cosmos DB for NoSQL (Serverless) + Vector Search |
@@ -34,18 +34,18 @@ An AI-powered tool designed to help an Interviewer effectively elicit tacit know
 graph TB
     subgraph Browser["Browser (Frontend)"]
         MIC["🎤 Microphone"]
-        VL_WS["Voice Live WebSocket"]
+        SPEECH["Speech SDK<br/>Continuous Recognition"]
         FE["Frontend App<br/>app.js / ui.js / modal.js"]
         BE_WS["Backend WebSocket Client"]
     end
 
-    subgraph VoiceLive["Azure Voice Live API"]
-        VL_API["Realtime Transcription<br/>wss://...voice-live/realtime"]
+    subgraph SpeechService["Azure Speech Service"]
+        STT["Speech-to-Text<br/>wss://...cognitiveservices.azure.com"]
     end
 
     subgraph Backend["Backend (FastAPI / App Service)"]
         APP["FastAPI"]
-        R_VL["/api/voicelive/token"]
+        R_SP["/api/speech/token"]
         R_WS["/ws/interview/{id}"]
         AGT_SVC["Agent Service"]
         COS_SVC["Cosmos Service"]
@@ -70,15 +70,15 @@ graph TB
         COSMOS[("interviews / transcripts<br/>agent_responses / reports")]
     end
 
-    MIC -->|"PCM16 audio"| VL_WS
-    VL_WS -->|"base64 audio"| VL_API
-    VL_API -->|"transcription text"| VL_WS
-    VL_WS -->|"transcript"| FE
+    MIC -->|"audio"| SPEECH
+    SPEECH -->|"WebSocket (SDK)"| STT
+    STT -->|"recognized text"| SPEECH
+    SPEECH -->|"transcript"| FE
 
     FE -->|"HTTP/WS"| APP
-    APP --> R_VL
+    APP --> R_SP
     APP --> R_WS
-    R_VL --> VL_WS
+    R_SP --> SPEECH
 
     R_WS --> AGT_SVC
     R_WS --> COS_SVC
@@ -125,8 +125,7 @@ pip install -r requirements.txt
 
 export AZURE_COSMOS_DB_ENDPOINT="https://<your-cosmos>.documents.azure.com:443/"
 export AZURE_AI_PROJECT_ENDPOINT="https://<resource>.services.ai.azure.com/api/projects/<project>"
-export AZURE_VOICELIVE_ENDPOINT="https://<resource>.services.ai.azure.com"
-export AZURE_VOICELIVE_MODEL="gpt-4o-mini"
+export AZURE_SPEECH_ENDPOINT="https://<resource>.services.ai.azure.com"
 
 uvicorn app:app --reload --port 8000
 ```
@@ -166,7 +165,7 @@ npm run dev
 │   ├── config.py
 │   ├── routers/
 │   │   ├── interviews.py     # REST API
-│   │   ├── voicelive.py      # Voice Live token issuance
+│   │   ├── speech.py         # Speech Service token issuance
 │   │   └── websocket.py      # WebSocket (3 agent roles)
 │   ├── services/
 │   │   ├── agent_service.py   # Foundry Agent + MCP + report generation
@@ -178,13 +177,11 @@ npm run dev
 │   ├── js/
 │   │   ├── app.js
 │   │   ├── i18n.js           # JP/EN internationalization
-│   │   ├── voicelive.js      # Voice Live direct WebSocket connection
+│   │   ├── speech.js         # Azure Speech SDK continuous recognition
 │   │   ├── websocket.js      # Backend communication + silence detection
 │   │   ├── ui.js
 │   │   └── modal.js
-│   ├── public/js/
-│   │   └── pcm-processor.js  # AudioWorklet
-│   └── css/
+│   ├── css/
 ├── spec/
 │   ├── app-specification.md
 │   └── architecture.md
@@ -207,7 +204,7 @@ Each role uses an independent conversation to prevent context bloat.
 | Resource | Purpose |
 |---|---|
 | App Service (Linux, Python 3.12) | Application hosting |
-| AI Foundry (CognitiveServices/accounts) | Agent Service / Voice Live API / Embedding |
+| AI Foundry (CognitiveServices/accounts) | Agent Service / Speech ASR / Embedding |
 | Foundry Project (CognitiveServices/accounts/projects) | Agent management |
 | Cosmos DB for NoSQL (Serverless) | Data persistence + Vector search |
 | Azure Functions (Flex Consumption) | MCP Server (interview vector search tools) |
@@ -292,8 +289,8 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 
 ## Technical Notes
 
-- **Voice Live SDK Limitation**: `@azure/ai-voicelive` v1.0.0-beta.3 does not serialize `input_audio_transcription`, so a direct WebSocket connection is used instead
-- **Browser WebSocket Authentication**: Bearer token is sent via the `authorization` query parameter
+- **Speech SDK Authentication**: Uses `SpeechConfig.fromEndpoint(URL, TokenCredential)` with Entra ID bearer token. The `services.ai.azure.com` domain is converted to `cognitiveservices.azure.com` for Speech SDK WebSocket compatibility
+- **Noise Suppression**: Browser WebRTC (default `getUserMedia`). Speech SDK's Microsoft Audio Stack (MAS) is not available in JavaScript
 - **Report Generation**: Uses a direct model call instead of going through the agent (to avoid JSON output constraints)
 - **Noise Removal**: Large transcripts are chunked at 90K tokens + 10K overlap and processed by the LLM
 - **Transcript Curation**: Before report generation, a dedicated curation agent removes noise and duplicate context while preserving content
@@ -309,7 +306,7 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 
 エキスパート（Interviewee）の暗黙知をInterviewerが効果的に引き出すための AI 補助ツールです。
 
-- **リアルタイム文字起こし**: Azure Voice Live API（WebSocket 直接接続、日本語・英語対応）
+- **リアルタイム文字起こし**: Azure AI Speech SDK（連続認識、日本語・英語対応）
 - **補足情報提示**: 会話の途切れを検出し、専門用語・技術概念を自動検索して素人向けに解説
 - **質問案生成**: ボタンクリックで文字起こし履歴に基づく効果的な次の質問を提案
 - **チャット Q&A**: Interviewer がリアルタイムに AI に質問可能
@@ -323,7 +320,7 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 |---|---|
 | フロントエンド | JavaScript (Vanilla JS) + Vite |
 | バックエンド | Python (FastAPI) on Azure App Service |
-| リアルタイム文字起こし | Azure Voice Live API (直接 WebSocket 接続) |
+| リアルタイム文字起こし | Azure AI Speech SDK (連続認識) |
 | AI エージェント | Microsoft Foundry Agent Service (azure-ai-projects v2) |
 | エージェントツール | Microsoft Learn MCP Server |
 | データストア | Azure Cosmos DB for NoSQL (Serverless) + ベクトル検索 |
@@ -337,18 +334,18 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 graph TB
     subgraph Browser["ブラウザ (フロントエンド)"]
         MIC["🎙️ マイク"]
-        VL_WS["Voice Live WebSocket"]
+        SPEECH_WS["Speech SDK 連続認識"]
         FE["フロントエンドアプリ<br/>app.js / ui.js / modal.js"]
         BE_WS["バックエンド WebSocket"]
     end
 
-    subgraph VoiceLive["Azure Voice Live API"]
-        VL_API["リアルタイム文字起こし<br/>wss://...voice-live/realtime"]
+    subgraph SpeechService["Azure Speech Service"]
+        STT_API["リアルタイム文字起こし<br/>wss://...cognitiveservices.azure.com"]
     end
 
     subgraph Backend["バックエンド (FastAPI / App Service)"]
         APP["FastAPI"]
-        R_VL["/api/voicelive/token"]
+        R_SP["/api/speech/token"]
         R_WS["/ws/interview/{id}"]
         AGT_SVC["エージェントサービス"]
         COS_SVC["Cosmos サービス"]
@@ -427,8 +424,7 @@ pip install -r requirements.txt
 
 export AZURE_COSMOS_DB_ENDPOINT="https://<your-cosmos>.documents.azure.com:443/"
 export AZURE_AI_PROJECT_ENDPOINT="https://<resource>.services.ai.azure.com/api/projects/<project>"
-export AZURE_VOICELIVE_ENDPOINT="https://<resource>.services.ai.azure.com"
-export AZURE_VOICELIVE_MODEL="gpt-4o-mini"
+export AZURE_SPEECH_ENDPOINT="https://<resource>.services.ai.azure.com"
 
 uvicorn app:app --reload --port 8000
 ```
@@ -468,7 +464,7 @@ npm run dev
 │   ├── config.py
 │   ├── routers/
 │   │   ├── interviews.py     # REST API
-│   │   ├── voicelive.py      # Voice Live トークン発行
+│   │   ├── speech.py         # Speech Service トークン発行
 │   │   └── websocket.py      # WebSocket (3つのエージェント役割)
 │   ├── services/
 │   │   ├── agent_service.py   # Foundry Agent + MCP + レポート生成
@@ -480,12 +476,10 @@ npm run dev
 │   ├── js/
 │   │   ├── app.js
 │   │   ├── i18n.js           # JP/EN 国際化
-│   │   ├── voicelive.js      # Voice Live WebSocket 直接接続
+│   │   ├── speech.js         # Azure Speech SDK 連続認識
 │   │   ├── websocket.js      # バックエンド通信 + 無音検出
 │   │   ├── ui.js
 │   │   └── modal.js
-│   ├── public/js/
-│   │   └── pcm-processor.js  # AudioWorklet
 │   └── css/
 ├── spec/
 │   ├── app-specification.md
@@ -509,7 +503,7 @@ npm run dev
 | リソース | 用途 |
 |---|---|
 | App Service (Linux, Python 3.12) | アプリホスティング |
-| AI Foundry (CognitiveServices/accounts) | Agent Service / Voice Live API / Embedding |
+| AI Foundry (CognitiveServices/accounts) | Agent Service / Speech ASR / Embedding |
 | Foundry Project (CognitiveServices/accounts/projects) | エージェント管理 |
 | Cosmos DB for NoSQL (Serverless) | データ永続化 + ベクトル検索 |
 | Azure Functions (Flex Consumption) | MCP Server（インタビューベクトル検索ツール） |
@@ -592,7 +586,8 @@ az functionapp keys list \
 
 ## 技術的な注意事項
 
-- **Voice Live SDK の制限**: `@azure/ai-voicelive` v1.0.0-beta.3 は `input_audio_transcription` をシリアライズしないため、直接 WebSocket 接続を使用
+- **Speech SDK 認証**: `SpeechConfig.fromEndpoint(URL, TokenCredential)` でEntra IDトークンを使用。`services.ai.azure.com` ドメインは Speech SDK WebSocket 互換性のため `cognitiveservices.azure.com` に変換
+- **ノイズ抑制**: ブラウザ WebRTC ノイズ抑制（`getUserMedia` のデフォルト動作）。Speech SDK の Microsoft Audio Stack (MAS) は JavaScript 環境では利用不可
 - **ブラウザ WebSocket 認証**: `authorization` クエリパラメータで Bearer トークンを送信
 - **レポート生成**: エージェント経由ではなく直接モデル呼び出し（JSON 出力制約を回避）
 - **ノイズ除去**: 大量の文字起こしは90Kトークン+10K重複でチャンク分割してLLMで処理

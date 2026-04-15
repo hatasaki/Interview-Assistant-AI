@@ -21,14 +21,14 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 │                    Browser (Frontend)                        │
 │                     JavaScript / HTML                        │
 │                                                              │
-│  ┌──────────────┐  WebSocket    ┌──────────────────────────┐ │
-│  │ Microphone   │──────────────▶│ Voice Live API           │ │
-│  │ (getUserMedia │  audio in    │ wss://<resource>.services │ │
-│  │  + Web Audio) │              │  .ai.azure.com/          │ │
-│  └──────────────┘              │  voice-live/realtime     │ │
+│  ┌──────────────┐              ┌──────────────────────────┐ │
+│  │ Microphone   │              │ Azure Speech SDK         │ │
+│  │ (getUserMedia │─────────────▶│ (CDN: microsoft.         │ │
+│  │  via SDK)    │              │  cognitiveservices.       │ │
+│  └──────────────┘              │  speech.sdk.bundle.js)   │ │
 │                                │                          │ │
-│                                │ onInputAudioTranscription│ │
-│                                │ Completed (text events)  │ │
+│                                │ SpeechRecognizer         │ │
+│                                │ .recognized (text events)│ │
 │                                └────────┬─────────────────┘ │
 │                                         │ transcription      │
 │                                         ▼ text               │
@@ -53,7 +53,7 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 │            ▼               │  │ MCP Server             │  │  │
 │  ┌────────────────────┐    │  │ learn.microsoft.com    │  │  │
 │  │ Token Endpoint     │    │  │ /api/mcp               │  │  │
-│  │ GET /api/voicelive │    │  └────────────────────────┘  │  │
+│  │ GET /api/speech    │    │  └────────────────────────┘  │  │
 │  │ /token             │    └──────────────────────────────┘  │
 │  │ (Entra ID Bearer)  │                                      │
 │  └────────────────────┘                                      │
@@ -66,19 +66,19 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 ```
 
 > **重要なアーキテクチャ上の決定事項:**
-> - Voice Live API は本来 speech-to-speech（音声入出力双方向）用のAPIだが、本アプリでは **文字起こし専用** として利用する
-> - `modalities: ["text"]` + `turn_detection.create_response: false` を設定し、モデルの自動応答を抑制
-> - `input_audio_transcription` を明示的に設定し、入力音声の文字起こしイベント（`conversation.item.input_audio_transcription.completed`）を有効化
-> - `azure_semantic_vad_multilingual` を使用（日本語対応。`azure_semantic_vad` は主に英語のみ）
-> - ブラウザから Voice Live API に直接 WebSocket 接続するが、認証トークンはバックエンドから取得（`AzureKeyCredential` 経由）
+> - リアルタイム文字起こしには **Azure AI Speech SDK**（`microsoft-cognitiveservices-speech-sdk` CDN版）の連続認識（`startContinuousRecognitionAsync`）を使用する
+> - Speech SDK はブラウザで直接マイク入力をハンドリングし、Azure Speech Service のWebSocketエンドポイントに接続する
+> - AI Foundry リソース（`kind: AIServices`）が提供する `cognitiveservices.azure.com` ドメインのエンドポイントを使用
+> - Entra ID 認証は `SpeechConfig.fromEndpoint(URL, TokenCredential)` でトークンクレデンシャルを渡す方式
+> - ノイズ抑制は Speech SDK の Microsoft Audio Stack（MAS）がJavaScriptで利用不可のため、ブラウザの WebRTC ノイズ抑制（`getUserMedia` デフォルト有効）に依存する
 
 ### 2.1 技術スタック
 
 | レイヤー | 技術 | 備考 |
 |---|---|---|
-| フロントエンド | JavaScript (Vanilla JS or lightweight framework) | モダン UI デザイン |
+| フロントエンド | JavaScript (Vanilla JS) + Vite | モダン UI デザイン |
 | バックエンド | Python (FastAPI) | App Service 上で稼働 |
-| リアルタイム文字起こし | Azure Voice Live API | `@azure/ai-voicelive` JS SDK v1.0.0-beta.3（ブラウザ対応）|
+| リアルタイム文字起こし | Azure AI Speech SDK | `microsoft-cognitiveservices-speech-sdk` CDN版（ブラウザ連続認識）|
 | AI エージェント | Microsoft Foundry Agent Service（Prompt Agent） | `azure-ai-projects` >= 2.0.0 Python SDK |
 | エージェントツール | Microsoft Learn MCP Server | エンドポイント: `https://learn.microsoft.com/api/mcp`（認証不要）|
 | データストア | Azure Cosmos DB for NoSQL | Managed Identity 認証（`azure-cosmos`）|
@@ -87,14 +87,14 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 | ホスティング | Azure App Service | Basic 認証無効（OIDC デプロイ） |
 | ユーザー認証 | App Service Easy Auth (Microsoft Entra ID) | `azd up` 時に自動構成 |
 | リソース間認証 | DefaultAzureCredential / ManagedIdentityCredential | 組織ポリシー準拠 |
-| Voice Live 認証 | Entra ID Bearer Token（バックエンド発行 → フロントエンド利用）| `Cognitive Services User` ロール必要 |
+| Speech 認証 | Entra ID Bearer Token（バックエンド発行 → フロントエンド利用）| `Cognitive Services User` ロール必要 |
 
 ### 2.2 Azureリソース
 
 | リソース | 用途 |
 |---|---|
 | App Service | フロントエンド静的ファイル配信 + Python バックエンド |
-| Microsoft Foundry リソース | Voice Live API エンドポイント + Foundry Agent Service（Prompt Agent）|
+| Microsoft Foundry リソース (`kind: AIServices`) | Azure AI Speech エンドポイント + Foundry Agent Service（Prompt Agent）|
 | Foundry プロジェクト | エージェント管理。エンドポイント形式: `https://<resource>.ai.azure.com/api/projects/<project>` |
 | Cosmos DB for NoSQL | インタビューデータ永続化 + ベクトル検索 |
 | Azure Functions (Flex Consumption) | MCP Server（インタビューデータのベクトル検索ツール提供） |
@@ -203,7 +203,7 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 [左ペイン] 「開始」ボタンがアクティブ化
     │ クリック
     ▼
-文字起こし開始（Voice Live API 接続）
+文字起こし開始（Azure Speech SDK 連続認識）
     │
     ├──▶ [左ペイン] リアルタイム文字起こし表示開始
     │
@@ -241,31 +241,39 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 
 ### 4.2 リアルタイム文字起こし
 
-- **技術**: Azure Voice Live API（`@azure/ai-voicelive` JavaScript SDK v1.0.0-beta.3）
-- **接続方式**: ブラウザから直接 Voice Live API に WebSocket 接続
-  - WebSocket エンドポイント: `wss://<resource>.services.ai.azure.com/voice-live/realtime?api-version=2025-10-01&model=<model>`
-- **音声入力**: Interviewer の PC マイク（`navigator.mediaDevices.getUserMedia()` で取得）
-- **文字起こしイベント**: `onInputAudioTranscriptionCompleted` でテキスト取得
-- **セッション設定（文字起こし専用モード）**:
-  - `modalities`: `["text"]`（モデルの音声出力を無効化）
-  - `inputAudioFormat`: `"pcm16"`
-  - `inputAudioTranscription`: `{ model: "azure-speech", language: "ja" }`（Azure STT で入力音声を文字起こし）
-  - `turnDetection`: `{ type: "azure_semantic_vad_multilingual", create_response: false, silence_duration_ms: 500, languages: ["ja"] }`
-    - `create_response: false` を設定し、モデルの自動応答を抑制（文字起こしのみ取得）
-    - `azure_semantic_vad_multilingual` で日本語対応の高精度な発話区間検出（日本語を含む多言語対応。`azure_semantic_vad` は主に英語のみ）
-- **話者識別**: Voice Live API は話者識別（ダイアライゼーション）を提供しないため、エージェントが文脈から推測する
+- **技術**: Azure AI Speech SDK（`microsoft-cognitiveservices-speech-sdk` CDN版）
+  - ブラウザ向けバンドル: `https://aka.ms/csspeech/jsbrowserpackageraw`（`<script>` タグで読み込み）
+  - グローバル変数 `window.SpeechSDK` として利用可能
+- **接続方式**: Speech SDK がブラウザ内で直接 Azure Speech Service のWebSocketエンドポイントに接続
+  - SDK が内部的にマイク入力の取得（`getUserMedia`）、音声エンコーディング、WebSocket通信を一括管理
+  - 認識モード: **連続認識**（`startContinuousRecognitionAsync`）
+- **音声入力**: `AudioConfig.fromDefaultMicrophoneInput()` でブラウザのデフォルトマイクを使用
+  - Speech SDK が内部的に `navigator.mediaDevices.getUserMedia()` を呼び出す
+- **文字起こしイベント**:
+  - `recognized` イベント: 確定された認識結果（`ResultReason.RecognizedSpeech`）→ エージェントへの入力に使用
+  - `recognizing` イベント: 中間結果（ログのみ）
+  - `canceled` イベント: エラーハンドリング
+  - `sessionStopped` イベント: セッション終了ログ
+- **SpeechConfig 設定**:
+  - `speechRecognitionLanguage`: `"ja-JP"` または `"en-US"`（言語トグルに連動）
+  - `SpeechServiceConnection_EndSilenceTimeoutMs`: `"500"`（500ms の無音でフレーズ確定）
+- **ノイズ抑制**:
+  - Speech SDK の Microsoft Audio Stack（MAS）は JavaScript 環境では利用不可（C#/C++/Java のみ）
+  - ブラウザの WebRTC ノイズ抑制（`getUserMedia` のデフォルト `noiseSuppression: true`）に依存
+  - Speech SDK の `fromDefaultMicrophoneInput()` がブラウザのデフォルト設定を使用するため自動的に有効
+- **話者識別**: Speech SDK は話者識別（ダイアライゼーション）を提供しないため、エージェントが文脈から推測する
 - **文字起こしテキストの流れ**:
-  1. ブラウザが Voice Live API に PCM16 音声データを `session.sendAudio()` で送信
-  2. Voice Live API が `onInputAudioTranscriptionCompleted` イベントで文字起こしテキストを返送
+  1. Speech SDK がブラウザのマイクから音声を取得し、Azure Speech Service に送信
+  2. `recognized` イベントで確定テキストを受信
   3. 左ペインにリアルタイム表示
   4. WebSocket 経由でバックエンドに送信
   5. バックエンドが Cosmos DB に保存 + Foundry Agent Service に入力
 - **ブラウザ認証**:
   - `DefaultAzureCredential` はブラウザでは使用不可
-  - バックエンド API `GET /api/voicelive/token` で Microsoft Entra ID トークン（scope: `https://ai.azure.com/.default` 推奨。レガシー: `https://cognitiveservices.azure.com/.default`）を取得
-  - フロントエンドは取得したトークンを `AzureKeyCredential` 経由で Voice Live SDK に渡す（SDK が内部的に `api-key` クエリパラメータとして WebSocket 接続時に使用）
-  - **注意**: `AzureKeyCredential` は API キー認証用だが、Entra ID トークンも同じインターフェースで渡すことが可能。SDK が適切にハンドリングする
-  - トークンは短時間で失効するため、セッション中に定期的に再取得する
+  - バックエンド API `GET /api/speech/token` で Microsoft Entra ID トークン（scope: `https://cognitiveservices.azure.com/.default`）を取得
+  - AI Foundry リソースのエンドポイント（`services.ai.azure.com`）を `cognitiveservices.azure.com` ドメインに変換して Speech SDK に渡す
+  - `SpeechConfig.fromEndpoint(URL, TokenCredential)` で認証。`TokenCredential` オブジェクトは `getToken()` メソッドでトークンを返す
+  - **注意**: `services.ai.azure.com` ドメインは AI Foundry API用であり、Speech SDK のWebSocketパスには対応しない。同一リソースの `cognitiveservices.azure.com` ドメインを使用する必要がある
 
 ### 4.3 インタビュー補助エージェント
 
@@ -584,7 +592,7 @@ response = openai.responses.create(
 | POST | `/api/interviews/{id}/stop` | インタビュー終了（レポート生成開始） |
 | GET | `/api/interviews/{id}/report` | 生成済みレポートを取得 |
 | GET | `/api/interviews/{id}/report/status` | レポート生成状況を取得 |
-| GET | `/api/voicelive/token` | Voice Live API 用 Entra ID トークン発行 |
+| GET | `/api/speech/token` | Azure Speech Service 用 Entra ID トークン発行 |
 
 ### 6.2 WebSocket API
 
@@ -665,13 +673,10 @@ interview-assistant-ai/
 │   │   └── style.css                  # モダン UI スタイル
 │   ├── js/
 │   │   ├── app.js                     # アプリメイン
-│   │   ├── voicelive.js               # Voice Live API 直接 WebSocket 接続
+│   │   ├── speech.js                  # Azure Speech SDK 連続認識
 │   │   ├── websocket.js               # バックエンド WebSocket 通信 + 無音検出
 │   │   ├── ui.js                      # UI 操作・レンダリング
 │   │   └── modal.js                   # インタビュー詳細登録モーダル
-│   ├── public/
-│   │   └── js/
-│   │       └── pcm-processor.js       # AudioWorklet PCM16 変換プロセッサ
 │   ├── package.json                   # npm 依存定義（SDK不使用）
 │   ├── vite.config.js                 # Vite バンドラー設定
 │   └── dist/                          # ビルド成果物（.gitignore 対象）
@@ -682,7 +687,7 @@ interview-assistant-ai/
 │   ├── config.py                      # 環境変数・設定
 │   ├── routers/
 │   │   ├── interviews.py              # REST API ルーター
-│   │   ├── voicelive.py               # Voice Live トークン発行 API
+│   │   ├── speech.py                  # Speech Service トークン発行 API
 │   │   └── websocket.py               # WebSocket ルーター（3つのエージェント役割）
 │   ├── services/
 │   │   ├── agent_service.py           # Foundry Agent Service 連携 + レポート生成
@@ -728,7 +733,7 @@ interview-assistant-ai/
 }
 ```
 
-> **重要な実装上の決定**: `@azure/ai-voicelive` SDK v1.0.0-beta.3 は `input_audio_transcription` プロパティのシリアライズに対応していないため、SDK を使用せず **Voice Live API に直接 WebSocket 接続**する方式を採用。フロントエンドに npm 依存パッケージはない（Vite のみ devDependencies）。
+> **重要な実装上の決定**: リアルタイム文字起こしには Azure AI Speech SDK（`microsoft-cognitiveservices-speech-sdk` CDN版）の連続認識（`startContinuousRecognitionAsync`）を使用。Speech SDK がブラウザでマイク入力・WebSocket通信を一括管理するため、AudioWorklet や手動のPCM16変換は不要。フロントエンドに npm 依存パッケージはない（Vite のみ devDependencies）。
 
 **フロントエンドのビルド**: Vite でバンドルし `frontend/dist/` に出力。`azd` の prepackage フックで自動実行。
 
@@ -776,11 +781,11 @@ pydantic>=2.0
 | Microsoft Foundry リソース | Azure AI User | App Service Managed Identity |
 | Cosmos DB | Cosmos DB Built-in Data Contributor | App Service Managed Identity |
 
-> **注意**: Voice Live API の認証には `Cognitive Services User` **と** `Azure AI User` の**両方**のロールが必要。
+> **注意**: Speech Service の認証には `Cognitive Services User` **と** `Azure AI User` の**両方**のロールが必要。
 
-### 9.4 Voice Live トークン API のセキュリティ
+### 9.4 Speech トークン API のセキュリティ
 
-- `GET /api/voicelive/token` エンドポイントは Easy Auth により認証済みユーザーのみアクセス可能
+- `GET /api/speech/token` エンドポイントは Easy Auth により認証済みユーザーのみアクセス可能
 - トークンの有効期限を応答に含め、フロントエンドが期限前に再取得できるようにする
 
 ### 9.5 WebSocket 接続の認証
@@ -796,16 +801,16 @@ pydantic>=2.0
 
 ---
 
-## 10. Voice Live API 詳細仕様
+## 10. Azure Speech SDK 詳細仕様
 
 ### 10.1 ブラウザ認証フロー
 
-Voice Live API は Microsoft Entra ID のBearerトークン認証を使用する。ブラウザでは `DefaultAzureCredential` が使用できないため、以下のフローを採用する:
+Azure Speech Service は認証トークンによるアクセスを使用する。ブラウザでは `DefaultAzureCredential` が使用できないため、以下のフローを採用する:
 
 ```
 Browser                          Backend                       Entra ID
   │                                │                              │
-  │ GET /api/voicelive/token       │                              │
+  │ GET /api/speech/token          │                              │
   │──────────────────────────────▶│                              │
   │                                │ DefaultAzureCredential       │
   │                                │  .get_token(scope)           │
@@ -813,10 +818,10 @@ Browser                          Backend                       Entra ID
   │                                │◀─────────────────────────────│
   │                                │  Bearer token                │
   │◀──────────────────────────────│                              │
-  │  { token, endpoint, model }    │                              │
+  │  { token, endpoint, region }   │                              │
   │                                │                              │
-  │ WebSocket connect with Bearer  │                              │
-  │────────────────────────────────────────▶ Voice Live API       │
+  │ Speech SDK 連続認識開始         │                              │
+  │  (SpeechConfig + token)        │                              │
 ```
 
 **バックエンド側トークン発行（Python）:**
@@ -826,94 +831,67 @@ from azure.identity import DefaultAzureCredential
 
 credential = DefaultAzureCredential()
 
-@app.get("/api/voicelive/token")
-async def get_voicelive_token():
+@app.get("/api/speech/token")
+async def get_speech_token():
     token = credential.get_token("https://cognitiveservices.azure.com/.default")
     return {
         "token": token.token,
-        "endpoint": VOICELIVE_ENDPOINT,  # e.g. "https://<resource>.services.ai.azure.com"
-        "model": VOICELIVE_MODEL,        # e.g. "gpt-4o"
+        "endpoint": AZURE_SPEECH_ENDPOINT,  # e.g. "https://<resource>.cognitiveservices.azure.com"
+        "region": AZURE_SPEECH_REGION,      # e.g. "japaneast"
         "expiresOn": token.expires_on,
     }
 ```
 
-### 10.2 ブラウザ側実装（直接 WebSocket 接続）
+### 10.2 ブラウザ側実装（Speech SDK 連続認識）
 
-SDK を使用せず、Voice Live API に直接 WebSocket 接続する。認証は `authorization` クエリパラメータで Bearer トークンを送信する。
+Azure Speech SDK（CDN版 `microsoft-cognitiveservices-speech-sdk`）を使用し、連続認識でリアルタイム文字起こしを行う。
 
 ```javascript
 // バックエンドからトークンを取得
-const res = await fetch("/api/voicelive/token");
-const { token, endpoint, model } = await res.json();
+const res = await fetch("/api/speech/token");
+const { token, endpoint, region } = await res.json();
 
-// WebSocket URL を構築（Bearer トークンを authorization パラメータで送信）
-const host = new URL(endpoint).host;
-const wsUrl = `wss://${host}/voice-live/realtime?api-version=2025-10-01&model=${model}&authorization=${encodeURIComponent("Bearer " + token)}`;
-const ws = new WebSocket(wsUrl);
+// SpeechConfig を endpoint + token で構築
+const speechConfig = SpeechSDK.SpeechConfig.fromEndpoint(
+  new URL(endpoint),
+  undefined  // サブスクリプションキーは不要
+);
+speechConfig.authorizationToken = `aad#${endpoint}#${token}`;
+speechConfig.speechRecognitionLanguage = "ja-JP";
 
-ws.onopen = () => {
-  // session.update で文字起こし専用モードを設定
-  ws.send(JSON.stringify({
-    type: "session.update",
-    session: {
-      modalities: ["text"],
-      input_audio_format: "pcm16",
-      input_audio_transcription: { model: "azure-speech", language: "ja" },
-      turn_detection: {
-        type: "azure_semantic_vad_multilingual",
-        create_response: false,
-        silence_duration_ms: 500,
-        languages: ["ja"],
-      },
-      input_audio_noise_reduction: { type: "azure_deep_noise_suppression" },
-    },
-  }));
-};
+// マイク入力の AudioConfig
+const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
 
-ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === "session.updated") startMicrophoneCapture();
-  if (msg.type === "conversation.item.input_audio_transcription.completed") {
-    displayTranscript(msg.transcript);
-    sendToBackend(msg.transcript);
+// SpeechRecognizer を作成
+const recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+
+// 認識イベントハンドラ
+recognizer.recognized = (sender, event) => {
+  if (event.result.reason === SpeechSDK.ResultReason.RecognizedSpeech) {
+    displayTranscript(event.result.text);
+    sendToBackend(event.result.text);
   }
 };
 
-// 音声は input_audio_buffer.append で base64 エンコードして送信
-ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64Data }));
+recognizer.recognizing = (sender, event) => {
+  // 中間結果（リアルタイムフィードバック用）
+  displayInterimTranscript(event.result.text);
+};
+
+// 連続認識を開始
+recognizer.startContinuousRecognitionAsync();
 ```
 
-> **SDK 不使用の理由**: `@azure/ai-voicelive` v1.0.0-beta.3 の `requestSessionSerializer` が `input_audio_transcription` プロパティをシリアライズ対象に含めていないため、SDK 経由では文字起こしイベントが発火しない。直接 WebSocket 接続により REST API プロトコルの snake_case プロパティ名をそのまま送信することで解決。
-
-### 10.3 Voice Live API セッション設定の詳細
+### 10.3 Speech SDK 設定の詳細
 
 | パラメータ | 値 | 理由 |
 |---|---|---|
-| `modalities` | `["text"]` | 音声出力不要（テキスト文字起こしのみ）|
-| `input_audio_transcription.model` | `"azure-speech"` | Azure STT による高精度文字起こし |
-| `input_audio_transcription.language` | `"ja"` | 日本語インタビュー向け |
-| `turn_detection.type` | `"azure_semantic_vad_multilingual"` | 多言語対応セマンティック VAD（日本語含む10言語対応）|
-| `turn_detection.create_response` | `false` | **重要**: モデルの自動応答を抑制し、文字起こしのみ取得 |
-| `turn_detection.silence_duration_ms` | `500` | 発話終了判定の無音時間 |
-| `turn_detection.languages` | `["ja"]` | 日本語でのフィラーワード除去精度向上 |
-| `input_audio_noise_reduction.type` | `"azure_deep_noise_suppression"` | 環境ノイズ除去 |
-| `input_audio_format` | `"pcm16"` | 標準 PCM 16bit フォーマット |
-| `input_audio_sampling_rate` | `24000` | デフォルトサンプリングレート |
+| `speechRecognitionLanguage` | `"ja-JP"` | 日本語インタビュー向け |
+| `AudioConfig` | `fromDefaultMicrophoneInput()` | ブラウザのデフォルトマイクを使用 |
+| 認証方式 | `aad#endpoint#token` | Managed Identity ベースの Entra ID トークン認証 |
+| エンドポイント形式 | `*.cognitiveservices.azure.com` | Speech SDK が要求するドメイン形式（`services.ai.azure.com` から変換）|
 
-> **設計判断の根拠**: Voice Live API は本来 speech-to-speech 用だが、`create_response: false` と `modalities: ["text"]` の組み合わせにより、文字起こし専用モードとして機能させる。Voice Live API を採用する利点は、Azure Semantic VAD による高精度な発話区間検出、ノイズ抑制、および WebSocket ベースの低遅延リアルタイム処理である。
-> 
-> **`azure_semantic_vad` vs `azure_semantic_vad_multilingual`**: `azure_semantic_vad` は主に英語のみサポート。日本語インタビューでは **`azure_semantic_vad_multilingual`** を使用すること（日本語・英語・中国語・韓国語等10言語対応）。
-
-### 10.4 Voice Live API サポートモデル（文字起こし用）
-
-| モデル | 説明 | 推奨度 |
-|---|---|---|
-| `gpt-4o` | GPT-4o + Azure STT 入力 | ○ 推奨（コスト・品質バランス）|
-| `gpt-4o-mini` | GPT-4o mini + Azure STT 入力 | ◎ 最推奨（文字起こし専用なら低コスト）|
-| `gpt-4.1-mini` | GPT-4.1 mini + Azure STT 入力 | ○ 推奨 |
-| `gpt-5-nano` | GPT-5 nano + Azure STT 入力 | ○ 最低コスト |
-
-> 注: `create_response: false` 設定により、モデルの推論は実質発生しないため、STT 処理のみのコストとなる。低コストモデルの選択を推奨。
+> **設計判断の根拠**: Azure Speech SDK の連続認識（`startContinuousRecognitionAsync`）を使用することで、SDK がマイク入力・WebSocket通信・音声エンコーディングを一括管理する。AudioWorklet や手動のPCM16変換が不要となり、実装がシンプルになる。`recognized` イベントで確定テキスト、`recognizing` イベントで中間結果をリアルタイムに取得できる。
 
 ---
 
@@ -924,14 +902,14 @@ ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64Data })
 | レイテンシ | 文字起こし: 1秒以内の遅延。エージェント応答: 5秒以内目標 |
 | 同時接続 | 要確認（質問事項参照） |
 | UI | モダンデザイン、レスポンシブ、ダークモード非対応でも可 |
-| ブラウザ対応 | Chrome, Edge（最新版）。Safari は AudioWorklet API の互換性要確認 |
+| ブラウザ対応 | Chrome, Edge（最新版）。Safari は Speech SDK の互換性要確認 |
 | データ保持 | 要確認（質問事項参照） |
 
 ### 11.1 エラーハンドリング・リカバリ
 
 | シナリオ | 対応方針 |
 |---|---|
-| Voice Live WebSocket 切断 | 自動再接続（exponential backoff）。再接続時にトークンを再取得 |
+| Speech SDK 切断 | 自動再接続（exponential backoff）。再接続時にトークンを再取得 |
 | バックエンド WebSocket 切断 | 自動再接続。文字起こしはフロントエンド側でバッファリングし、再接続後に送信 |
 | Foundry Agent Service タイムアウト | リトライ（最大3回）。失敗時は UI にエラー表示 |
 | MCP ツール呼び出し失敗 | エージェントが別の検索クエリで再試行。最終的に失敗時はユーザーに通知 |
@@ -959,12 +937,9 @@ ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64Data })
 
 | 技術 | ドキュメント |
 |---|---|
-| Voice Live API 概要 | https://learn.microsoft.com/azure/ai-services/speech-service/voice-live |
-| Voice Live JS SDK (npm) | https://www.npmjs.com/package/@azure/ai-voicelive |
-| Voice Live JS SDK リファレンス | https://learn.microsoft.com/javascript/api/overview/azure/ai-voicelive-readme?view=azure-node-preview |
-| Voice Live API リファレンス (2025-10-01) | https://learn.microsoft.com/azure/ai-services/speech-service/voice-live-api-reference-2025-10-01 |
-| Voice Live How-to ガイド | https://learn.microsoft.com/azure/ai-services/speech-service/voice-live-how-to |
-| Voice Live クイックスタート (JS) | https://learn.microsoft.com/azure/ai-services/speech-service/voice-live-quickstart?pivots=programming-language-javascript |
+| Azure Speech SDK 概要 | https://learn.microsoft.com/azure/ai-services/speech-service/speech-sdk |
+| Speech SDK JS クイックスタート | https://learn.microsoft.com/azure/ai-services/speech-service/get-started-speech-to-text?pivots=programming-language-javascript |
+| Speech SDK CDN リファレンス | https://aka.ms/csspeech/jsbrowserpackage |
 | Foundry Agent Service 概要 | https://learn.microsoft.com/azure/foundry/agents/overview |
 | Foundry クイックスタート (Python) | https://learn.microsoft.com/azure/foundry/quickstarts/get-started-code?pivots=programming-language-python |
 | Foundry Agent + MCP ツール | https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol |
@@ -989,12 +964,12 @@ ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64Data })
   - `openai.conversations.create()` で会話作成
   - `openai.responses.create(conversation=..., input=..., extra_body={"agent_reference": ...})` でエージェント呼び出し
 
-### 13.2 Voice Live API の文字起こし専用利用について
+### 13.2 Azure Speech SDK の連続認識について
 
-- Voice Live API は本質的に speech-to-speech API であり、文字起こし専用の API ではない
-- `turn_detection.create_response = false` で自動応答を抑制し、`input_audio_transcription` で文字起こしのみ取得する運用
-- `onInputAudioTranscriptionCompleted` イベントは入力音声の文字起こし結果を提供する（モデル応答とは独立）
-- 代替案として Azure AI Speech Transcription SDK（`@azure/ai-speech-transcription`）も存在するが、ユーザー要件により Voice Live API を採用
+- Azure Speech SDK の `startContinuousRecognitionAsync` によりリアルタイム文字起こしを実現
+- `recognized` イベントで確定テキスト、`recognizing` イベントで中間結果を取得
+- SDK がマイク入力・WebSocket通信・音声エンコーディングを一括管理するため、AudioWorklet や手動のPCM16変換は不要
+- CDN 版（`microsoft-cognitiveservices-speech-sdk`）を使用し、npm 依存なしでブラウザで動作
 
 ### 13.3 Microsoft Learn MCP Server
 

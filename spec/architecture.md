@@ -9,21 +9,20 @@ Interview Assistant AI は、インタビュー中のリアルタイム音声文
 ```mermaid
 graph TB
     subgraph Browser["ブラウザ (Frontend)"]
-        MIC["🎤 マイク<br/>getUserMedia"]
-        AW["AudioWorklet<br/>pcm-processor.js"]
-        VL_WS["Voice Live WebSocket<br/>voicelive.js"]
+        MIC["🎤 マイク<br/>Speech SDK"]
+        SPEECH_JS["Speech SDK 連続認識<br/>speech.js"]
         FE["Frontend App<br/>app.js / ui.js / modal.js"]
         BE_WS["Backend WebSocket Client<br/>websocket.js"]
     end
 
-    subgraph Azure_VoiceLive["Azure Voice Live API"]
-        VL_API["Voice Live Realtime<br/>wss://...voice-live/realtime"]
+    subgraph Azure_Speech["Azure AI Speech Service"]
+        SPEECH_API["Speech-to-Text<br/>wss://...cognitiveservices.azure.com/<br/>speech/recognition/..."]
     end
 
     subgraph Backend["Backend (FastAPI / App Service)"]
         APP["FastAPI Application<br/>app.py"]
         R_INT["interviews Router<br/>/api/interviews"]
-        R_VL["voicelive Router<br/>/api/voicelive/token"]
+        R_SP["speech Router<br/>/api/speech/token"]
         R_WS["WebSocket Router<br/>/ws/interview/{id}"]
         AGT_SVC["Agent Service<br/>agent_service.py"]
         COS_SVC["Cosmos Service<br/>cosmos_service.py"]
@@ -48,19 +47,18 @@ graph TB
         MCP_SRV["MCP Server<br/>(ベクトル検索ツール)"]
     end
 
-    MIC -->|"PCM audio"| AW
-    AW -->|"Float32→PCM16"| VL_WS
-    VL_WS -->|"input_audio_buffer.append<br/>(base64 PCM16)"| VL_API
-    VL_API -->|"conversation.item.<br/>input_audio_transcription<br/>.completed"| VL_WS
-    VL_WS -->|"transcript text"| FE
+    MIC -->|"audio"| SPEECH_JS
+    SPEECH_JS -->|"WebSocket<br/>(SDK 管理)"| SPEECH_API
+    SPEECH_API -->|"recognized<br/>event"| SPEECH_JS
+    SPEECH_JS -->|"transcript text"| FE
 
     FE -->|"transcript / supplementary_info /<br/>chat_message / generate_questions"| BE_WS
     BE_WS -->|"agent_suggestion /<br/>agent_references /<br/>report_ready"| FE
 
     FE -->|"HTTP POST/GET"| R_INT
-    FE -->|"HTTP GET (token)"| R_VL
+    FE -->|"HTTP GET (token)"| R_SP
 
-    R_VL -->|"DefaultAzureCredential<br/>→ Bearer Token"| VL_WS
+    R_SP -->|"DefaultAzureCredential<br/>→ Bearer Token"| SPEECH_JS
 
     R_WS --> AGT_SVC
     R_WS --> COS_SVC
@@ -80,7 +78,7 @@ graph TB
     MCP_SRV -->|"Managed Identity"| DB_IR
 
     style Browser fill:#e1f5fe,stroke:#0288d1
-    style Azure_VoiceLive fill:#fff3e0,stroke:#ef6c00
+    style Azure_Speech fill:#fff3e0,stroke:#ef6c00
     style Backend fill:#e8f5e9,stroke:#2e7d32
     style Azure_AI fill:#f3e5f5,stroke:#7b1fa2
     style Azure_Cosmos fill:#fce4ec,stroke:#c62828
@@ -97,7 +95,7 @@ graph TB
 
 | チャネル | プロトコル | 接続元 → 接続先 | 用途 |
 |---|---|---|---|
-| Voice Live WebSocket | WSS | ブラウザ → Azure Voice Live API | 音声データ送信 + 文字起こし受信 |
+| Speech SDK WebSocket | WSS | ブラウザ (Speech SDK) → Azure Speech Service | 音声データ送信 + 文字起こし受信 (SDK管理) |
 | Backend WebSocket | WS/WSS | ブラウザ → FastAPI Backend | 文字起こし転送・エージェント応答受信 |
 | REST API | HTTPS | ブラウザ → FastAPI Backend | インタビューCRUD・トークン取得・レポート取得 |
 | Agent API | HTTPS | FastAPI Backend → Azure AI Foundry | エージェント会話 |
@@ -109,7 +107,7 @@ graph TB
 sequenceDiagram
     participant User as Interviewer (ブラウザ)
     participant FE as Frontend (JS)
-    participant VL as Voice Live API
+    participant Speech as Azure Speech Service
     participant BE_WS as Backend WebSocket
     participant AGT as Foundry Agent
     participant MCP as Microsoft Learn MCP
@@ -125,12 +123,10 @@ sequenceDiagram
     Note over User,DB: Phase 2: インタビュー開始
     User->>FE: 「開始」ボタンクリック
     FE->>BE_WS: POST /api/interviews/{id}/start (REST)
-    FE->>BE_WS: GET /api/voicelive/token (REST)
-    BE_WS-->>FE: Bearer Token + endpoint + model
+    FE->>BE_WS: GET /api/speech/token (REST)
+    BE_WS-->>FE: Bearer Token + endpoint
 
-    FE->>VL: WebSocket接続 (wss://...voice-live/realtime)
-    FE->>VL: session.update (modalities, transcription設定)
-    VL-->>FE: session.created → session.updated
+    FE->>FE: Speech SDK 連続認識開始<br/>(SpeechConfig.fromEndpoint + TokenCredential)
 
     FE->>BE_WS: WebSocket接続 (/ws/interview/{id})
 
@@ -145,8 +141,7 @@ sequenceDiagram
 
     Note over User,DB: Phase 3: リアルタイム文字起こしループ
     User->>FE: 音声入力 (マイク)
-    FE->>VL: input_audio_buffer.append (base64 PCM16)
-    VL-->>FE: conversation.item.input_audio_transcription.completed
+    FE->>FE: Speech SDK recognized イベントでテキスト取得
     FE->>FE: 左ペインに文字起こし表示
     FE->>BE_WS: {type: "transcript", text: "..."}
     BE_WS->>DB: transcripts コンテナに保存
@@ -185,7 +180,7 @@ sequenceDiagram
 
     Note over User,DB: Phase 6: インタビュー終了 + レポート生成
     User->>FE: 「終了」ボタンクリック
-    FE->>VL: WebSocket切断
+    FE->>VL: Speech SDK 停止 (stopContinuousRecognitionAsync)
     FE->>BE_WS: POST /api/interviews/{id}/stop (REST)
     BE_WS->>DB: status → completed
     BE_WS->>BE_WS: BackgroundTask: レポート生成開始
@@ -216,13 +211,13 @@ graph LR
         APP["app.js<br/>メインエントリポイント"]
         MODAL["modal.js<br/>モーダル制御"]
         UI["ui.js<br/>UI描画ユーティリティ"]
-        VOICELIVE["voicelive.js<br/>Voice Live API接続"]
+        SPEECH["speech.js<br/>Azure Speech SDK 連続認識"]
         WS["websocket.js<br/>Backend WebSocket通信"]
     end
 
     APP --> MODAL
     APP --> UI
-    APP --> VOICELIVE
+    APP --> SPEECH
     APP --> WS
 
     style Frontend fill:#e1f5fe,stroke:#0288d1
@@ -233,7 +228,7 @@ graph LR
 | `app.js` | アプリケーションのメインエントリポイント。各モジュールの初期化、ボタンイベントのバインド、インタビューライフサイクル管理（開始・停止・レポート表示）。レポートポーリング制御 |
 | `modal.js` | インタビュー詳細登録モーダルの表示/非表示制御、フォーム送信ハンドリング。`initModal(callback)` で登録完了コールバックを設定 |
 | `ui.js` | DOM 操作ユーティリティ。文字起こし表示、AI提案カード描画、参照リンク追加、レポートモーダル描画。Markdown の簡易レンダリング、HTML エスケープ処理 |
-| `voicelive.js` | Azure Voice Live API への直接 WebSocket 接続。マイク音声の取得→PCM16変換→base64送信、文字起こしイベントの受信とコールバック呼び出し |
+| `speech.js` | Azure Speech SDK による連続音声認識。バックエンドから取得したEntra IDトークンで `SpeechConfig.fromEndpoint(URL, TokenCredential)` を構成。`recognized` イベントで確定テキストをコールバックに返す |
 | `websocket.js` | バックエンド WebSocket との通信管理。文字起こし転送（バッファリング+無音検出）、補足情報リクエスト、質問生成リクエスト、チャットメッセージ送信。自動再接続機能 |
 
 ### 3.2 フロントエンドの状態管理
@@ -245,30 +240,18 @@ stateDiagram-v2
     [*] --> アプリ起動
     アプリ起動 --> 詳細登録待ち: ページロード
     詳細登録待ち --> 開始待ち: モーダルで登録完了<br/>interviewId取得
-    開始待ち --> インタビュー中: 「開始」ボタン<br/>Voice Live接続<br/>Backend WS接続
-    インタビュー中 --> インタビュー終了: 「終了」ボタン<br/>Voice Live切断
+    開始待ち --> インタビュー中: 「開始」ボタン<br/>Speech SDK連続認識開始<br/>Backend WS接続
+    インタビュー中 --> インタビュー終了: 「終了」ボタン<br/>Speech SDK停止
     インタビュー終了 --> レポート待ち: レポート生成中<br/>(ポーリング)
     レポート待ち --> レポート表示: 生成完了<br/>「レポート表示」ボタン
     レポート表示 --> 新規インタビュー: 「新規インタビューを始める」
     新規インタビュー --> アプリ起動: ページリロード
 ```
 
-### 3.3 音声キャプチャパイプライン
+### 3.3 音声キャプチャ
 
-```mermaid
-graph LR
-    MIC["🎤 マイク<br/>getUserMedia<br/>sampleRate: 24000<br/>channelCount: 1"]
-    -->|MediaStream| SOURCE["MediaStreamSource"]
-    -->|Float32 audio| WORKLET["AudioWorkletNode<br/>pcm-processor.js"]
-    -->|"port.onmessage<br/>PCM16 ArrayBuffer"| ENCODE["Base64エンコード<br/>_arrayBufferToBase64()"]
-    -->|"JSON: input_audio_buffer.append<br/>{type, audio}"| VL_WS["Voice Live<br/>WebSocket"]
-```
-
-**`pcm-processor.js` (AudioWorklet)**:
-- `AudioWorkletProcessor` を継承
-- `process()` メソッドで Float32 → Int16（PCM16）変換
-- `Math.max(-32768, Math.min(32767, sample * 32768))` でクリッピング
-- 変換後の PCM16 バッファを `port.postMessage()` でメインスレッドに転送
+Speech SDK の `AudioConfig.fromDefaultMicrophoneInput()` がブラウザのマイク入力を直接管理する。
+AudioWorklet や手動の PCM16 変換は不要（SDK が内部的に処理）。
 
 ---
 
@@ -280,7 +263,7 @@ graph LR
 graph TB
     subgraph Routers["routers/"]
         R_INT["interviews.py<br/>REST API"]
-        R_VL["voicelive.py<br/>トークン発行"]
+        R_SP["speech.py<br/>トークン発行"]
         R_WS["websocket.py<br/>WebSocket ハンドラ"]
     end
 
@@ -298,12 +281,12 @@ graph TB
     CFG["config.py<br/>環境変数"]
 
     APP_PY --> R_INT
-    APP_PY --> R_VL
+    APP_PY --> R_SP
     APP_PY --> R_WS
 
     R_INT --> COS
     R_INT --> RPT
-    R_VL --> CFG
+    R_SP --> CFG
     R_WS --> AGT
     R_WS --> COS
     RPT --> AGT
@@ -331,7 +314,7 @@ graph TB
 | `POST` | `/api/interviews/{id}/stop` | インタビュー終了（status → `completed`）+ レポート生成開始 |
 | `GET` | `/api/interviews/{id}/report` | レポート取得 |
 | `GET` | `/api/interviews/{id}/report/status` | レポート生成状況取得 |
-| `GET` | `/api/voicelive/token` | Voice Live API 用 Bearer トークン取得 |
+| `GET` | `/api/speech/token` | Azure Speech Service 用 Bearer トークン取得 |
 
 ### 4.3 WebSocket メッセージプロトコル
 
@@ -607,103 +590,96 @@ flowchart TD
 
 ---
 
-## 6. Voice Live API 接続詳細
+## 6. Azure Speech SDK 接続詳細
 
 ### 6.1 接続アーキテクチャ
 
 ```mermaid
 sequenceDiagram
-    participant FE as Frontend (voicelive.js)
-    participant BE as Backend (/api/voicelive/token)
+    participant FE as Frontend (speech.js)
+    participant BE as Backend (/api/speech/token)
     participant EntraID as Microsoft Entra ID
-    participant VL as Voice Live API
+    participant Speech as Azure Speech Service
 
-    Note over FE,VL: Step 1: 認証トークン取得
-    FE->>BE: GET /api/voicelive/token
+    Note over FE,Speech: Step 1: 認証トークン取得
+    FE->>BE: GET /api/speech/token
     BE->>EntraID: DefaultAzureCredential<br/>.get_token("https://cognitiveservices.azure.com/.default")
     EntraID-->>BE: Bearer Token
-    BE-->>FE: {token, endpoint, model, expiresOn}
+    BE-->>FE: {token, region, endpoint}
 
-    Note over FE,VL: Step 2: WebSocket接続
-    FE->>VL: new WebSocket(<br/>"wss://{host}/voice-live/realtime<br/>?api-version=2025-10-01<br/>&model={model}<br/>&authorization=Bearer+{token}")
+    Note over FE,Speech: Step 2: SpeechConfig 構成
+    FE->>FE: endpoint を cognitiveservices.azure.com に変換<br/>(services.ai.azure.com → cognitiveservices.azure.com)
+    FE->>FE: TokenCredential オブジェクト作成<br/>{getToken: () => Promise.resolve({token, expiresOnTimestamp})}
+    FE->>FE: SpeechConfig.fromEndpoint(URL, TokenCredential)
 
-    Note over FE,VL: Step 3: セッション設定
-    FE->>VL: session.update
-    VL-->>FE: session.created
-    VL-->>FE: session.updated
+    Note over FE,Speech: Step 3: 連続認識開始
+    FE->>FE: AudioConfig.fromDefaultMicrophoneInput()
+    FE->>FE: new SpeechRecognizer(speechConfig, audioConfig)
+    FE->>Speech: startContinuousRecognitionAsync()
+    Note right of Speech: SDK が内部的に WebSocket 接続を管理<br/>wss://<resource>.cognitiveservices.azure.com/<br/>speech/recognition/conversation/...
 
-    Note over FE,VL: Step 4: 音声送信ループ
-    loop マイク音声キャプチャ中
-        FE->>VL: input_audio_buffer.append<br/>{type, audio: "base64..."}
+    Note over FE,Speech: Step 4: 文字起こし受信ループ
+    loop 連続認識中
+        Speech-->>FE: recognized イベント<br/>{result.text: "文字起こしテキスト"}
     end
 
-    Note over FE,VL: Step 5: 文字起こし受信
-    VL-->>FE: conversation.item.<br/>input_audio_transcription.completed<br/>{transcript: "文字起こしテキスト"}
+    Note over FE,Speech: Step 5: 停止
+    FE->>Speech: stopContinuousRecognitionAsync()
 ```
 
-### 6.2 Voice Live セッション設定
+### 6.2 Speech SDK 設定
 
-Voice Live API は本来 speech-to-speech（音声双方向）用 API だが、本アプリでは **文字起こし専用モード** として使用する。
-
-```json
-{
-  "type": "session.update",
-  "session": {
-    "modalities": ["text"],
-    "input_audio_format": "pcm16",
-    "input_audio_transcription": {
-      "model": "azure-speech",
-      "language": "ja"
-    },
-    "turn_detection": {
-      "type": "azure_semantic_vad_multilingual",
-      "create_response": false,
-      "silence_duration_ms": 500,
-      "threshold": 0.5,
-      "languages": ["ja"]
-    },
-    "input_audio_noise_reduction": {
-      "type": "azure_deep_noise_suppression"
-    }
-  }
-}
+```javascript
+// SpeechConfig
+speechConfig.speechRecognitionLanguage = "ja-JP"; // or "en-US"
+speechConfig.setProperty(
+  sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs,
+  "500"
+);
 ```
 
 | 設定項目 | 値 | 説明 |
 |---|---|---|
-| `modalities` | `["text"]` | モデルの音声出力を無効化。テキストのみ |
-| `input_audio_format` | `pcm16` | 24kHz 16bit PCM オーディオ |
-| `input_audio_transcription.model` | `azure-speech` | Azure Speech Services による文字起こし |
-| `input_audio_transcription.language` | `ja` | 日本語 |
-| `turn_detection.type` | `azure_semantic_vad_multilingual` | 多言語対応セマンティック VAD（日本語対応） |
-| `turn_detection.create_response` | `false` | モデルの自動応答を抑制（文字起こし専用） |
-| `turn_detection.silence_duration_ms` | `500` | 500ms の無音で発話区間終了を判定 |
-| `input_audio_noise_reduction.type` | `azure_deep_noise_suppression` | ディープノイズ抑制 |
+| `speechRecognitionLanguage` | `"ja-JP"` / `"en-US"` | 認識言語（言語トグルに連動） |
+| `EndSilenceTimeoutMs` | `"500"` | 500ms の無音でフレーズ確定 |
+| `AudioConfig` | `fromDefaultMicrophoneInput()` | ブラウザのデフォルトマイク入力 |
+| 認識モード | 連続認識 (`startContinuousRecognitionAsync`) | インタビュー全体を通して認識を継続 |
 
-### 6.3 SDK を使わない理由
+### 6.3 エンドポイントドメイン変換
 
-JavaScript SDK v1.0.0-beta.3 には `modalities` 設定時に `input_audio_transcription` をシリアライズしない既知バグがある。そのため本アプリでは **WebSocket 直接接続** を採用している。
+AI Foundry リソース（`kind: AIServices`）は2つのドメインを提供する:
 
-### 6.4 Voice Live イベントフロー
+| ドメイン | 用途 |
+|---|---|
+| `<name>.services.ai.azure.com` | AI Foundry / OpenAI API / Agent Service |
+| `<name>.cognitiveservices.azure.com` | Speech / Vision / 他の Cognitive Services API |
 
-```mermaid
-stateDiagram-v2
-    [*] --> WebSocket接続
-    WebSocket接続 --> session_created: session.created 受信
-    session_created --> session_update送信: session.update 送信
-    session_update送信 --> session_updated: session.updated 受信
-    session_updated --> マイクキャプチャ開始: マイク取得 + AudioWorklet接続
-    
-    state マイクキャプチャ開始 {
-        [*] --> 音声送信中
-        音声送信中 --> 音声送信中: input_audio_buffer.append
-        音声送信中 --> 文字起こし受信: transcription.completed
-        文字起こし受信 --> 音声送信中: 次の音声
-    }
-    
-    マイクキャプチャ開始 --> 切断: stopVoiceLive()
-    切断 --> [*]
+Bicep の `AZURE_SPEECH_ENDPOINT` 出力は `services.ai.azure.com` 形式であるため、
+`speech.js` でフロントエンド側でドメインを変換する:
+
+```javascript
+speechHost = endpoint.replace(".services.ai.azure.com", ".cognitiveservices.azure.com");
 ```
+
+### 6.4 ノイズ抑制
+
+Speech SDK の Microsoft Audio Stack（MAS）は JavaScript/ブラウザ環境では利用不可（C#/C++/Java のみ対応）。
+ブラウザの WebRTC ノイズ抑制（`getUserMedia` のデフォルト `noiseSuppression: true`）に依存する。
+Speech SDK の `fromDefaultMicrophoneInput()` がブラウザのデフォルト設定を使用するため、自動的に有効。
+
+    Note over FE,Speech: Step 1: 認証トークン取得
+    FE->>BE: GET /api/speech/token
+    BE->>EntraID: DefaultAzureCredential<br/>.get_token("https://cognitiveservices.azure.com/.default")
+    EntraID-->>BE: Bearer Token
+    BE-->>FE: {token, endpoint, region, expiresOn}
+
+    Note over FE,Speech: Step 2: Speech SDK 連続認識開始
+    FE->>Speech: SpeechRecognizer<br/>startContinuousRecognitionAsync()
+
+    Note over FE,Speech: Step 3: リアルタイム文字起こし
+    loop マイク音声キャプチャ中
+        Speech-->>FE: recognized イベント<br/>(event.result.text)
+    end
 
 ---
 
@@ -714,18 +690,15 @@ stateDiagram-v2
 ```mermaid
 flowchart LR
     subgraph Input["音声入力"]
-        MIC["🎤 マイク<br/>(24kHz, mono)"]
+        MIC["🎤 マイク<br/>(fromDefaultMicrophoneInput)"]
     end
 
-    subgraph Processing["音声処理 (ブラウザ内)"]
-        WORKLET["AudioWorklet<br/>Float32→PCM16"]
-        B64["Base64<br/>エンコード"]
+    subgraph SpeechSDK["Azure Speech SDK (ブラウザ内)"]
+        RECO["SpeechRecognizer<br/>連続認識"]
     end
 
-    subgraph VoiceLive["Voice Live API"]
-        VAD["Semantic VAD<br/>(発話区間検出)"]
-        DNS["Deep Noise<br/>Suppression"]
-        STT["Azure Speech<br/>(文字起こし)"]
+    subgraph AzureSpeech["Azure Speech Service"]
+        STT["Speech-to-Text<br/>(WebSocket)"]
     end
 
     subgraph Frontend["フロントエンド処理"]
@@ -745,20 +718,19 @@ flowchart LR
         SUGGEST["質問案生成"]
     end
 
-    MIC --> WORKLET --> B64 -->|WS| VAD
-    VAD --> DNS --> STT
-    STT -->|transcription<br/>completed| DISPLAY
-    STT -->|transcript text| BUFFER
+    MIC --> RECO -->|"WebSocket<br/>(SDK管理)"| STT
+    STT -->|"recognized<br/>event"| DISPLAY
+    STT -->|"transcript text"| BUFFER
     BUFFER --> SILENCE
-    SILENCE -->|5秒無音| SUPP
-    DISPLAY -->|sendTranscript| SAVE
+    SILENCE -->|"5秒無音"| SUPP
+    DISPLAY -->|"sendTranscript"| SAVE
 
-    SUPP --> ANALYZE -->|related_info<br/>references| Frontend
-    QGEN --> SUGGEST -->|suggested<br/>questions| Frontend
+    SUPP --> ANALYZE -->|"related_info<br/>references"| Frontend
+    QGEN --> SUGGEST -->|"suggested<br/>questions"| Frontend
 
     style Input fill:#ffecb3
-    style Processing fill:#e1f5fe
-    style VoiceLive fill:#fff3e0
+    style SpeechSDK fill:#e1f5fe
+    style AzureSpeech fill:#fff3e0
     style Frontend fill:#e8f5e9
     style BackendWS fill:#f3e5f5
     style Agent fill:#fce4ec
@@ -770,7 +742,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    TRANSCRIPT["文字起こしテキスト<br/>(Voice Live API から受信)"]
+    TRANSCRIPT["文字起こしテキスト<br/>(Speech SDK recognized イベント)"]
 
     TRANSCRIPT --> PATH1["パス 1: 即時表示 + DB 保存"]
     TRANSCRIPT --> PATH2["パス 2: バッファリング + エージェント呼び出し"]
@@ -964,14 +936,14 @@ flowchart LR
     subgraph Resources["Azure リソース"]
         COSMOS["Cosmos DB"]
         FOUNDRY["AI Foundry"]
-        VL["Voice Live API<br/>(同一 AI Services)"]
+        SPEECH["Azure Speech Service<br/>(同一 AI Services)"]
     end
 
     ENTRA -->|"ユーザー認証<br/>(Easy Auth)"| AUTH
     AUTH -->|"認証済みリクエストのみ"| MI
     MI -->|"Cosmos DB Built-in<br/>Data Contributor"| COSMOS
     MI -->|"Azure AI User"| FOUNDRY
-    MI -->|"Cognitive Services User<br/>(DefaultAzureCredential<br/>→ Bearer Token)"| VL
+    MI -->|"Cognitive Services User<br/>(DefaultAzureCredential<br/>→ Bearer Token)"|SPEECH
 
     style EasyAuth fill:#fff8e1,stroke:#f9a825
     style AppService fill:#e8f5e9,stroke:#2e7d32
@@ -986,7 +958,7 @@ flowchart LR
 - すべての Azure リソースアクセスは **Managed Identity** で認証（組織ポリシー準拠）
 - アクセスキー・接続文字列・SAS トークンは使用しない
 - App Service の Basic 認証（SCM/FTP）は **無効化**
-- Voice Live API のトークンはバックエンドで取得し、フロントエンドに短期トークンとして提供
+- Speech Service のトークンはバックエンドで取得し、フロントエンドに短期トークンとして提供
 
 ### 9.3 デプロイ
 
@@ -1064,7 +1036,7 @@ flowchart TD
 | WebSocket Handler | 各メッセージタイプのエージェント呼び出しに 60 秒タイムアウト。タイムアウト/例外はログ出力のみ |
 | Report Service | 例外時は `status: "failed"` + エラー詳細を Markdown として reports に保存 |
 | Frontend WebSocket | 切断時 3 秒後に自動再接続 |
-| Voice Live WebSocket | エラーイベントをコンソール出力。`stopVoiceLive()` でリソース解放 |
+| Speech SDK エラー | エラーイベントをコンソール出力。`stopContinuousRecognitionAsync()` でリソース解放 |
 | Agent Response Parse | JSON パース失敗時は生テキストを `relatedInfo` にフォールバック |
 | App Startup | エージェント初期化失敗時はログ出力のみ。初回リクエスト時にリトライ |
 
@@ -1074,8 +1046,8 @@ flowchart TD
 
 | 制約/判断 | 理由 |
 |---|---|
-| Voice Live API を文字起こし専用で使用 | `modalities: ["text"]` + `create_response: false` で音声出力を抑制 |
-| WebSocket 直接接続（SDK 不使用） | JS SDK v1.0.0-beta.3 の `input_audio_transcription` シリアライズバグ回避 |
+| Azure Speech SDK を文字起こしに使用 | `startContinuousRecognitionAsync` で連続認識。SDK がマイク入力・WebSocket通信を管理 |
+| Speech SDK CDN 版使用 | npm 依存なしでブラウザで動作。AudioWorklet/PCM16変換不要 |
 | 毎回新規 conversation を作成 | Role 間のコンテキスト汚染防止。各リクエストは独立した文脈で処理 |
 | レポート生成は直接モデル呼び出し | エージェントの JSON 出力制約が Markdown レポートに不適合 |
 | フロントエンドの無音検出（5秒） | 発話中のエージェント呼び出しを抑制し、まとまった内容で補足情報を生成 |

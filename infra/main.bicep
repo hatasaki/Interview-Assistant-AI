@@ -15,9 +15,6 @@ param aiFoundryResourceName string = ''
 @description('Name of the AI Foundry project (leave empty for auto-generated)')
 param aiFoundryProjectName string = ''
 
-@description('Model deployment name for Voice Live API')
-param voiceLiveModel string = 'gpt-4o-mini'
-
 @description('Model deployment name for Foundry Agent')
 param agentModel string = 'gpt-4o'
 
@@ -74,8 +71,7 @@ module appService 'modules/app-service.bicep' = {
     tags: tags
     cosmosDbAccountName: cosmosDb.outputs.accountName
     aiFoundryEndpoint: aiFoundry.outputs.projectEndpoint
-    voiceLiveEndpoint: aiFoundry.outputs.aiServicesEndpoint
-    voiceLiveModel: voiceLiveModel
+    speechEndpoint: aiFoundry.outputs.aiServicesEndpoint
     embeddingModel: embeddingModel
     authClientId: authClientId
     authClientSecret: authClientSecret
@@ -140,8 +136,7 @@ module mcpAiFoundryRbac 'modules/ai-rbac.bicep' = {
 output AZURE_RESOURCE_GROUP string = rg.name
 output AZURE_COSMOS_DB_ENDPOINT string = cosmosDb.outputs.endpoint
 output AZURE_AI_PROJECT_ENDPOINT string = aiFoundry.outputs.projectEndpoint
-output AZURE_VOICELIVE_ENDPOINT string = aiFoundry.outputs.aiServicesEndpoint
-output AZURE_VOICELIVE_MODEL string = voiceLiveModel
+output AZURE_SPEECH_ENDPOINT string = aiFoundry.outputs.aiServicesEndpoint
 output AZURE_EMBEDDING_MODEL string = embeddingModel
 output AZURE_WEBAPP_NAME string = appService.outputs.name
 output AZURE_WEBAPP_URL string = appService.outputs.url

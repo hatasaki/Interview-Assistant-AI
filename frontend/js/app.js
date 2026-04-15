@@ -10,7 +10,7 @@ import {
   addReferences,
   displayReport,
 } from "./ui.js";
-import { startVoiceLive, stopVoiceLive } from "./voicelive.js";
+import { startSpeechRecognition, stopSpeechRecognition } from "./speech.js";
 import {
   connectWebSocket,
   sendTranscript,
@@ -88,15 +88,15 @@ btnStart.addEventListener("click", async () => {
       },
     }, getLang());
 
-    // Start Voice Live transcription
+    // Start Speech recognition
     try {
-      await startVoiceLive((transcript) => {
+      await startSpeechRecognition((transcript) => {
         appendTranscript(transcript);
         sendTranscript(transcript);
       }, getLang());
     } catch (err) {
-      console.error("Voice Live error:", err);
-      appendTranscript("[" + t("voiceLiveError") + err.message + "]");
+      console.error("Speech recognition error:", err);
+      appendTranscript("[" + t("speechError") + err.message + "]");
     }
 
     isRunning = true;
@@ -118,9 +118,9 @@ btnStop.addEventListener("click", async () => {
   if (!interviewId) return;
 
   try {
-    stopVoiceLive();
+    stopSpeechRecognition();
   } catch (err) {
-    console.error("Stop Voice Live error:", err);
+    console.error("Stop speech recognition error:", err);
   }
 
   try {

@@ -16,11 +16,8 @@ param cosmosDbAccountName string
 @description('AI Foundry project endpoint')
 param aiFoundryEndpoint string
 
-@description('Voice Live API endpoint')
-param voiceLiveEndpoint string
-
-@description('Voice Live model name')
-param voiceLiveModel string
+@description('Azure Speech Service endpoint')
+param speechEndpoint string
 
 @description('Embedding model name')
 param embeddingModel string
@@ -74,12 +71,8 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           value: aiFoundryEndpoint
         }
         {
-          name: 'AZURE_VOICELIVE_ENDPOINT'
-          value: voiceLiveEndpoint
-        }
-        {
-          name: 'AZURE_VOICELIVE_MODEL'
-          value: voiceLiveModel
+          name: 'AZURE_SPEECH_ENDPOINT'
+          value: speechEndpoint
         }
         {
           name: 'AZURE_EMBEDDING_MODEL'
