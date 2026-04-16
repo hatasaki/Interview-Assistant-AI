@@ -6,8 +6,8 @@ import time
 
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import MCPTool, PromptAgentDefinition
-from azure.identity import DefaultAzureCredential
-from openai import RateLimitError, APIStatusError
+from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from openai import AzureOpenAI, RateLimitError, APIStatusError
 
 from config import AGENT_NAME, AZURE_AI_PROJECT_ENDPOINT, EMBEDDING_MODEL
 
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 _project: AIProjectClient | None = None
 _openai = None
+_azure_openai: AzureOpenAI | None = None
 
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 10  # seconds
@@ -408,10 +409,28 @@ def _curate_chunk(text: str) -> str:
     return response.output_text
 
 
+def _get_azure_openai() -> AzureOpenAI:
+    """Get a direct AzureOpenAI client (non-project-scoped) for embeddings."""
+    global _azure_openai
+    if _azure_openai is None:
+        # Extract AI Services base endpoint from project endpoint
+        # e.g. "https://xxx.services.ai.azure.com/api/projects/yyy" -> "https://xxx.services.ai.azure.com"
+        base = AZURE_AI_PROJECT_ENDPOINT.split("/api/projects")[0]
+        token_provider = get_bearer_token_provider(
+            DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+        )
+        _azure_openai = AzureOpenAI(
+            azure_endpoint=base,
+            azure_ad_token_provider=token_provider,
+            api_version="2024-10-21",
+        )
+    return _azure_openai
+
+
 def generate_embedding(text: str) -> list[float]:
     """Generate embedding vector for the given text using the embedding model."""
-    openai = _get_openai()
-    response = _call_with_retry(lambda: openai.embeddings.create(
+    client = _get_azure_openai()
+    response = _call_with_retry(lambda: client.embeddings.create(
         model=EMBEDDING_MODEL,
         input=text,
     ))
