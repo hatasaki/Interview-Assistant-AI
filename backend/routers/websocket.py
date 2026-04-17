@@ -37,6 +37,20 @@ def _interview_context(interview: dict) -> str:
     )
 
 
+def _format_transcript_line(t: dict) -> str:
+    """Format a transcript entry for agent prompts, prefixing the speaker.
+
+    speakerId comes from Azure Speech ConversationTranscriber
+    (e.g. "Guest-1", "Guest-2", "Unknown"). Older documents without
+    speakerId fall back to an unprefixed line for backward compatibility.
+    """
+    text = t.get("text", "")
+    speaker = t.get("speakerId", "")
+    if speaker:
+        return f"[{speaker}] {text}"
+    return text
+
+
 async def notify_report_ready(interview_id: str, report_id: str) -> None:
     msg = json.dumps({"type": "report_ready", "reportId": report_id})
     for ws in _connections.get(interview_id, []):
@@ -109,10 +123,12 @@ async def _handle_transcript(interview_id: str, msg: dict) -> None:
     if not text or len(text.strip()) < 3:
         return
 
+    speaker_id = msg.get("speakerId", "") or ""
+
     _seq_counters[interview_id] += 1
     seq = _seq_counters[interview_id]
 
-    doc = new_transcript_doc(interview_id, text, seq)
+    doc = new_transcript_doc(interview_id, text, seq, speaker_id)
     await asyncio.to_thread(cosmos_service.create_transcript, doc)
 
 
@@ -164,7 +180,7 @@ async def _handle_generate_questions(interview_id: str) -> None:
     transcripts = await asyncio.to_thread(
         cosmos_service.list_transcripts, interview_id
     )
-    transcript_text = "\n".join(t.get("text", "") for t in transcripts)
+    transcript_text = "\n".join(_format_transcript_line(t) for t in transcripts)
     if not transcript_text:
         return
 
@@ -213,7 +229,7 @@ async def _handle_chat_message(interview_id: str, msg: dict) -> None:
     transcripts = await asyncio.to_thread(
         cosmos_service.list_transcripts, interview_id
     )
-    transcript_text = "\n".join(t.get("text", "") for t in transcripts)
+    transcript_text = "\n".join(_format_transcript_line(t) for t in transcripts)
 
     interview = _interview_cache.get(interview_id, {})
     ctx = _interview_context(interview)

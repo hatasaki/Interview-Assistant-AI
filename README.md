@@ -6,7 +6,7 @@ A browser-based interview assistant web application. It supports the Interviewer
 
 An AI-powered tool designed to help an Interviewer effectively elicit tacit knowledge from an expert Interviewee.
 
-- **Real-time Transcription**: Azure AI Speech SDK (continuous recognition, Japanese/English support)
+- **Real-time Transcription**: Azure AI Speech SDK (`ConversationTranscriber`, Japanese/English support) with **speaker diarization** — each transcript line is tagged with a speaker ID (`Guest-1`, `Guest-2`, ..., `Unknown`) and displayed with a colored dot indicator in the UI
 - **Supplementary Information**: Detects pauses in conversation, automatically searches for technical terms and concepts, and provides beginner-friendly explanations
 - **Question Generation**: Suggests effective next questions based on transcript history at the click of a button
 - **Chat Q&A**: The Interviewer can ask the AI questions in real time
@@ -20,7 +20,7 @@ An AI-powered tool designed to help an Interviewer effectively elicit tacit know
 |---|---|
 | Frontend | JavaScript (Vanilla JS) + Vite |
 | Backend | Python (FastAPI) on Azure App Service |
-| Real-time Transcription | Azure AI Speech SDK (continuous recognition) |
+| Real-time Transcription | Azure AI Speech SDK (`ConversationTranscriber`, continuous conversation transcription with speaker diarization) |
 | AI Agent | Microsoft Foundry Agent Service (azure-ai-projects v2) |
 | Agent Tool | Microsoft Learn MCP Server |
 | Data Store | Azure Cosmos DB for NoSQL (Serverless) + Vector Search |
@@ -34,7 +34,7 @@ An AI-powered tool designed to help an Interviewer effectively elicit tacit know
 graph TB
     subgraph Browser["Browser (Frontend)"]
         MIC["🎤 Microphone"]
-        SPEECH["Speech SDK<br/>Continuous Recognition"]
+        SPEECH["Speech SDK<br/>ConversationTranscriber<br/>(Speaker Diarization)"]
         FE["Frontend App<br/>app.js / ui.js / modal.js"]
         BE_WS["Backend WebSocket Client"]
     end
@@ -72,8 +72,8 @@ graph TB
 
     MIC -->|"audio"| SPEECH
     SPEECH -->|"WebSocket (SDK)"| STT
-    STT -->|"recognized text"| SPEECH
-    SPEECH -->|"transcript"| FE
+    STT -->|"transcribed text<br/>+ speakerId"| SPEECH
+    SPEECH -->|"transcript + speakerId"| FE
 
     FE -->|"HTTP/WS"| APP
     APP --> R_SP
@@ -97,6 +97,15 @@ graph TB
 - [Azure Developer CLI (azd)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
 - [Node.js](https://nodejs.org/) >= 18
 - [Python](https://www.python.org/) >= 3.12
+
+## Speaker Diarization
+
+Real-time transcription uses Azure AI Speech's **`ConversationTranscriber`**, which clusters voices from a single microphone input and assigns a speaker ID to every finalized phrase.
+
+- **Speaker IDs**: `Guest-1`, `Guest-2`, ... (assigned automatically; no voice enrollment required). While the service is still learning the voices, early phrases may be labeled `Unknown`.
+- **UI**: Each transcript line is prefixed with a small colored dot (`●`). The color is derived from the speaker ID so that different speakers can be visually distinguished at a glance. Speaker names themselves are not shown in the UI.
+- **Agent input & reports**: Transcripts are passed to the agent (question suggestion, supplementary info, chat, report generation) in `[Guest-1] text` format so that the AI can reason about who said what. The service does not distinguish Interviewer vs. Interviewee — this is inferred from the conversational context.
+- **Storage**: Each transcript document in Cosmos DB carries a `speakerId` field. Documents saved before this feature was introduced remain backward-compatible (empty speaker tag).
 
 ## Deployment
 
@@ -177,7 +186,7 @@ npm run dev
 │   ├── js/
 │   │   ├── app.js
 │   │   ├── i18n.js           # JP/EN internationalization
-│   │   ├── speech.js         # Azure Speech SDK continuous recognition
+│   │   ├── speech.js         # Azure Speech SDK ConversationTranscriber (speaker diarization)
 │   │   ├── websocket.js      # Backend communication + silence detection
 │   │   ├── ui.js
 │   │   └── modal.js
@@ -306,7 +315,7 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 
 エキスパート（Interviewee）の暗黙知をInterviewerが効果的に引き出すための AI 補助ツールです。
 
-- **リアルタイム文字起こし**: Azure AI Speech SDK（連続認識、日本語・英語対応）
+- **リアルタイム文字起こし**: Azure AI Speech SDK（`ConversationTranscriber`、日本語・英語対応）を使用し、**話者分離（Speaker Diarization）** により各文字起こしに話者ID（`Guest-1`, `Guest-2`, ..., `Unknown`）を付与。UIでは話者ごとに色分けしたドットアイコンで表示
 - **補足情報提示**: 会話の途切れを検出し、専門用語・技術概念を自動検索して素人向けに解説
 - **質問案生成**: ボタンクリックで文字起こし履歴に基づく効果的な次の質問を提案
 - **チャット Q&A**: Interviewer がリアルタイムに AI に質問可能
@@ -320,7 +329,7 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 |---|---|
 | フロントエンド | JavaScript (Vanilla JS) + Vite |
 | バックエンド | Python (FastAPI) on Azure App Service |
-| リアルタイム文字起こし | Azure AI Speech SDK (連続認識) |
+| リアルタイム文字起こし | Azure AI Speech SDK（`ConversationTranscriber`、連続会話文字起こし・話者分離）|
 | AI エージェント | Microsoft Foundry Agent Service (azure-ai-projects v2) |
 | エージェントツール | Microsoft Learn MCP Server |
 | データストア | Azure Cosmos DB for NoSQL (Serverless) + ベクトル検索 |
@@ -334,7 +343,7 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 graph TB
     subgraph Browser["ブラウザ (フロントエンド)"]
         MIC["🎙️ マイク"]
-        SPEECH_WS["Speech SDK 連続認識"]
+        SPEECH_WS["Speech SDK<br/>ConversationTranscriber<br/>（話者分離）"]
         FE["フロントエンドアプリ<br/>app.js / ui.js / modal.js"]
         BE_WS["バックエンド WebSocket"]
     end
@@ -370,15 +379,15 @@ graph TB
         COSMOS[("interviews / transcripts<br/>agent_responses / reports")]
     end
 
-    MIC -->|"PCM16 音声"| VL_WS
-    VL_WS -->|"base64 音声"| VL_API
-    VL_API -->|"文字起こしテキスト"| VL_WS
-    VL_WS -->|"トランスクリプト"| FE
+    MIC -->|"\u97f3\u58f0"| SPEECH_WS
+    SPEECH_WS -->|"WebSocket (SDK)"| STT_API
+    STT_API -->|"\u78ba\u5b9a\u30c6\u30ad\u30b9\u30c8<br/>+ speakerId"| SPEECH_WS
+    SPEECH_WS -->|"\u30c8\u30e9\u30f3\u30b9\u30af\u30ea\u30d7\u30c8 + speakerId"| FE
 
     FE -->|"HTTP/WS"| APP
-    APP --> R_VL
+    APP --> R_SP
     APP --> R_WS
-    R_VL --> VL_WS
+    R_SP --> SPEECH_WS
 
     R_WS --> AGT_SVC
     R_WS --> COS_SVC
@@ -397,6 +406,15 @@ graph TB
 - [Azure Developer CLI (azd)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
 - [Node.js](https://nodejs.org/) >= 18
 - [Python](https://www.python.org/) >= 3.12
+
+## 話者分離（Speaker Diarization）
+
+リアルタイム文字起こしには Azure AI Speech の **`ConversationTranscriber`** を使用します。単一マイクのミックス音声から音声クラスタリングにより話者を自動分離し、各確定フレーズに話者IDを付与します。
+
+- **話者ID**: `Guest-1`, `Guest-2`, ...（自動採番、事前の声紋登録は不要）。初期の学習段階では `Unknown` が付くことがあります
+- **UI 表示**: 各文字起こし行の先頭に小さな色付きドット（`●`）を表示。色は話者IDから導出されるため、話者が異なれば一目で区別できます。話者名そのものは UI には表示しません
+- **エージェント入力・レポート**: 補足情報・質問生成・チャット・レポート生成すべてにおいて、文字起こしを `[Guest-1] text` 形式でエージェントに渡します。これにより AI が誰の発言かを区別できます。ただし Interviewer / Interviewee の属性判別はサービスは行わないため、文脈から推測します
+- **保存**: Cosmos DB の各トランスクリプトドキュメントに `speakerId` フィールドを保存。本機能導入前のドキュメントはそのまま互換動作します（空の話者タグ扱い）
 
 ## デプロイ
 
@@ -476,7 +494,7 @@ npm run dev
 │   ├── js/
 │   │   ├── app.js
 │   │   ├── i18n.js           # JP/EN 国際化
-│   │   ├── speech.js         # Azure Speech SDK 連続認識
+│   │   ├── speech.js         # Azure Speech SDK ConversationTranscriber（話者分離）
 │   │   ├── websocket.js      # バックエンド通信 + 無音検出
 │   │   ├── ui.js
 │   │   └── modal.js

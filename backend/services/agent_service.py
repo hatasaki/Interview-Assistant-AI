@@ -21,6 +21,17 @@ MAX_RETRIES = 5
 INITIAL_BACKOFF = 10  # seconds
 
 
+def _speaker_tag(t: dict) -> str:
+    """Return a speaker tag like ' [Guest-1]' or empty string when absent.
+
+    speakerId is populated by Azure Speech ConversationTranscriber
+    (e.g. "Guest-1", "Guest-2", "Unknown"). Older transcript documents
+    without this field fall back to no tag.
+    """
+    speaker = t.get("speakerId", "")
+    return f" [{speaker}]" if speaker else ""
+
+
 def _call_with_retry(fn):
     """Call fn() with exponential backoff on 429 errors."""
     for attempt in range(MAX_RETRIES):
@@ -338,7 +349,7 @@ def generate_report(
         transcript_text = curated_transcript
     else:
         transcript_text = "\n".join(
-            f"[{t.get('timestamp', '')}] {t.get('text', '')}" for t in transcripts
+            f"[{t.get('timestamp', '')}]{_speaker_tag(t)} {t.get('text', '')}" for t in transcripts
         )
         # Denoise transcript if too large
         transcript_text = _denoise_transcript(transcript_text)
@@ -370,7 +381,7 @@ def generate_report(
 def curate_transcript(transcripts: list[dict]) -> str:
     """Curate transcripts: remove noise and duplicate context while preserving content."""
     transcript_text = "\n".join(
-        f"[{t.get('timestamp', '')}] {t.get('text', '')}" for t in transcripts
+        f"[{t.get('timestamp', '')}]{_speaker_tag(t)} {t.get('text', '')}" for t in transcripts
     )
     if not transcript_text:
         return ""

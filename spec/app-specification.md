@@ -27,8 +27,9 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 │  │  via SDK)    │              │  cognitiveservices.       │ │
 │  └──────────────┘              │  speech.sdk.bundle.js)   │ │
 │                                │                          │ │
-│                                │ SpeechRecognizer         │ │
-│                                │ .recognized (text events)│ │
+│                                │ ConversationTranscriber  │ │
+│                                │ .transcribed             │ │
+│                                │  (text + speakerId)      │ │
 │                                └────────┬─────────────────┘ │
 │                                         │ transcription      │
 │                                         ▼ text               │
@@ -66,7 +67,7 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 ```
 
 > **重要なアーキテクチャ上の決定事項:**
-> - リアルタイム文字起こしには **Azure AI Speech SDK**（`microsoft-cognitiveservices-speech-sdk` CDN版）の連続認識（`startContinuousRecognitionAsync`）を使用する
+> - リアルタイム文字起こしには **Azure AI Speech SDK**（`microsoft-cognitiveservices-speech-sdk` CDN版）の連続会話文字起こし（`ConversationTranscriber.startTranscribingAsync`）を使用し、話者分離により `speakerId`（例: `Guest-1`, `Guest-2`, `Unknown`）を取得する
 > - Speech SDK はブラウザで直接マイク入力をハンドリングし、Azure Speech Service のWebSocketエンドポイントに接続する
 > - AI Foundry リソース（`kind: AIServices`）が提供する `cognitiveservices.azure.com` ドメインのエンドポイントを使用
 > - Entra ID 認証は `SpeechConfig.fromEndpoint(URL, TokenCredential)` でトークンクレデンシャルを渡す方式
@@ -78,7 +79,7 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 |---|---|---|
 | フロントエンド | JavaScript (Vanilla JS) + Vite | モダン UI デザイン |
 | バックエンド | Python (FastAPI) | App Service 上で稼働 |
-| リアルタイム文字起こし | Azure AI Speech SDK | `microsoft-cognitiveservices-speech-sdk` CDN版（ブラウザ連続認識）|
+| リアルタイム文字起こし | Azure AI Speech SDK | `microsoft-cognitiveservices-speech-sdk` CDN版（ブラウザ連続会話文字起こし・話者分離対応）|
 | AI エージェント | Microsoft Foundry Agent Service（Prompt Agent） | `azure-ai-projects` >= 2.0.0 Python SDK |
 | エージェントツール | Microsoft Learn MCP Server | エンドポイント: `https://learn.microsoft.com/api/mcp`（認証不要）|
 | データストア | Azure Cosmos DB for NoSQL | Managed Identity 認証（`azure-cosmos`）|
@@ -246,12 +247,13 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
   - グローバル変数 `window.SpeechSDK` として利用可能
 - **接続方式**: Speech SDK がブラウザ内で直接 Azure Speech Service のWebSocketエンドポイントに接続
   - SDK が内部的にマイク入力の取得（`getUserMedia`）、音声エンコーディング、WebSocket通信を一括管理
-  - 認識モード: **連続認識**（`startContinuousRecognitionAsync`）
+  - 認識モード: **連続会話文字起こし**（`ConversationTranscriber.startTranscribingAsync`）で話者分離を有効化
 - **音声入力**: `AudioConfig.fromDefaultMicrophoneInput()` でブラウザのデフォルトマイクを使用
   - Speech SDK が内部的に `navigator.mediaDevices.getUserMedia()` を呼び出す
+  - 単一マイクのミックス音声から Azure Speech の音声クラスタリングにより話者を自動分離
 - **文字起こしイベント**:
-  - `recognized` イベント: 確定された認識結果（`ResultReason.RecognizedSpeech`）→ エージェントへの入力に使用
-  - `recognizing` イベント: 中間結果（ログのみ）
+  - `transcribed` イベント: 確定された認識結果（`ResultReason.RecognizedSpeech`）→ `e.result.text` と `e.result.speakerId` を取得しエージェントへの入力に使用
+  - `transcribing` イベント: 中間結果（ログのみ）
   - `canceled` イベント: エラーハンドリング
   - `sessionStopped` イベント: セッション終了ログ
 - **SpeechConfig 設定**:
@@ -261,13 +263,19 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
   - Speech SDK の Microsoft Audio Stack（MAS）は JavaScript 環境では利用不可（C#/C++/Java のみ）
   - ブラウザの WebRTC ノイズ抑制（`getUserMedia` のデフォルト `noiseSuppression: true`）に依存
   - Speech SDK の `fromDefaultMicrophoneInput()` がブラウザのデフォルト設定を使用するため自動的に有効
-- **話者識別**: Speech SDK は話者識別（ダイアライゼーション）を提供しないため、エージェントが文脈から推測する
+- **話者識別（ダイアライゼーション）**:
+  - `ConversationTranscriber` がサービス側で話者を自動分離し、`speakerId` として `"Guest-1"`, `"Guest-2"`, ...（初期や特定不能時は `"Unknown"`）を付与する
+  - 事前の声紋登録は不要
+  - Interviewer / Interviewee の属性区別までは行わない（エージェントが文脈から推測）
+  - UI では発言テキストの先頭に `●` を表示し、`speakerId` ごとに色分けする（`Guest-1` など話者名自体は UI には出さない）
+  - バックエンドへは WebSocket 経由で `speakerId` を送信・Cosmos DB `transcript_entry` に保存
+  - エージェント入力・レポート生成時は各行を `[Guest-1] text` 形式に整形して渡し、AI が話者を区別可能にする
 - **文字起こしテキストの流れ**:
   1. Speech SDK がブラウザのマイクから音声を取得し、Azure Speech Service に送信
-  2. `recognized` イベントで確定テキストを受信
-  3. 左ペインにリアルタイム表示
-  4. WebSocket 経由でバックエンドに送信
-  5. バックエンドが Cosmos DB に保存 + Foundry Agent Service に入力
+  2. `transcribed` イベントで確定テキストと `speakerId` を受信
+  3. 左ペインにリアルタイム表示（`●` + テキスト）
+  4. WebSocket 経由でバックエンドに送信（`speakerId` 含む）
+  5. バックエンドが Cosmos DB に保存 + Foundry Agent Service に話者タグ付きで入力
 - **ブラウザ認証**:
   - `DefaultAzureCredential` はブラウザでは使用不可
   - バックエンド API `GET /api/speech/token` で Microsoft Entra ID トークン（scope: `https://cognitiveservices.azure.com/.default`）を取得
@@ -303,7 +311,7 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 ## 制約
 - 提示する情報はすべて素人にわかりやすい平易な表現で記述する
 - 専門用語を使う場合は必ず簡潔な説明を付ける
-- 文字起こしは Interviewer と Interviewee の区別がない場合がある。文脈から推測すること
+- 文字起こしには話者ID（`[Guest-1]`, `[Guest-2]`, `[Unknown]` など）が付与される。Interviewer / Interviewee の属性までは識別されないため、発言者の役割は文脈から推測すること
 - インタビューの時間とゴールを常に意識し、ゴール達成に向けた質問を優先する
 
 ## 入力情報
@@ -479,10 +487,14 @@ response = openai.responses.create(
   "interviewId": "uuid",
   "type": "transcript_entry",
   "text": "文字起こしテキスト",
+  "speakerId": "Guest-1",
   "timestamp": "ISO 8601 datetime",
   "sequenceNumber": 1
 }
 ```
+
+- `speakerId`: Azure Speech `ConversationTranscriber` が付与する話者ID（例: `"Guest-1"`, `"Guest-2"`, `"Unknown"`）
+- 既存の `speakerId` 未定義ドキュメントとの下位互換性のため、フィールドは空文字列を許容する
 
 #### コンテナ: `agent_responses`
 
@@ -733,7 +745,7 @@ interview-assistant-ai/
 }
 ```
 
-> **重要な実装上の決定**: リアルタイム文字起こしには Azure AI Speech SDK（`microsoft-cognitiveservices-speech-sdk` CDN版）の連続認識（`startContinuousRecognitionAsync`）を使用。Speech SDK がブラウザでマイク入力・WebSocket通信を一括管理するため、AudioWorklet や手動のPCM16変換は不要。フロントエンドに npm 依存パッケージはない（Vite のみ devDependencies）。
+> **重要な実装上の決定**: リアルタイム文字起こしには Azure AI Speech SDK（`microsoft-cognitiveservices-speech-sdk` CDN版）の連続会話文字起こし（`ConversationTranscriber.startTranscribingAsync`）を使用し、話者分離を利用する。Speech SDK がブラウザでマイク入力・WebSocket通信を一括管理するため、AudioWorklet や手動のPCM16変換は不要。フロントエンドに npm 依存パッケージはない（Vite のみ devDependencies）。
 
 **フロントエンドのビルド**: Vite でバンドルし `frontend/dist/` に出力。`azd` の prepackage フックで自動実行。
 
@@ -842,56 +854,69 @@ async def get_speech_token():
     }
 ```
 
-### 10.2 ブラウザ側実装（Speech SDK 連続認識）
+### 10.2 ブラウザ側実装（ConversationTranscriber による連続会話文字起こし）
 
-Azure Speech SDK（CDN版 `microsoft-cognitiveservices-speech-sdk`）を使用し、連続認識でリアルタイム文字起こしを行う。
+Azure Speech SDK（CDN版 `microsoft-cognitiveservices-speech-sdk`）の `ConversationTranscriber` を使用し、話者分離付きのリアルタイム文字起こしを行う。
 
 ```javascript
 // バックエンドからトークンを取得
 const res = await fetch("/api/speech/token");
-const { token, endpoint, region } = await res.json();
+const { token, endpoint } = await res.json();
 
-// SpeechConfig を endpoint + token で構築
-const speechConfig = SpeechSDK.SpeechConfig.fromEndpoint(
-  new URL(endpoint),
-  undefined  // サブスクリプションキーは不要
-);
-speechConfig.authorizationToken = `aad#${endpoint}#${token}`;
+// services.ai.azure.com → cognitiveservices.azure.com に変換
+const speechHost = endpoint.replace(".services.ai.azure.com", ".cognitiveservices.azure.com");
+
+// TokenCredential を構築 (Entra ID Bearer Token)
+const tokenCredential = {
+  getToken: () => Promise.resolve({
+    token,
+    expiresOnTimestamp: Date.now() + 3600 * 1000,
+  }),
+};
+
+// SpeechConfig を endpoint + TokenCredential で構築
+const speechConfig = SpeechSDK.SpeechConfig.fromEndpoint(new URL(speechHost), tokenCredential);
 speechConfig.speechRecognitionLanguage = "ja-JP";
+speechConfig.setProperty(
+  SpeechSDK.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs,
+  "500"
+);
 
 // マイク入力の AudioConfig
 const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
 
-// SpeechRecognizer を作成
-const recognizer = new SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+// ConversationTranscriber を作成（話者分離は自動有効化）
+const transcriber = new SpeechSDK.ConversationTranscriber(speechConfig, audioConfig);
 
-// 認識イベントハンドラ
-recognizer.recognized = (sender, event) => {
+// 確定結果イベント（text + speakerId）
+transcriber.transcribed = (sender, event) => {
   if (event.result.reason === SpeechSDK.ResultReason.RecognizedSpeech) {
-    displayTranscript(event.result.text);
-    sendToBackend(event.result.text);
+    const speakerId = event.result.speakerId || "Unknown"; // "Guest-1", "Guest-2", "Unknown"
+    displayTranscript(event.result.text, speakerId);
+    sendToBackend(event.result.text, speakerId);
   }
 };
 
-recognizer.recognizing = (sender, event) => {
-  // 中間結果（リアルタイムフィードバック用）
-  displayInterimTranscript(event.result.text);
+transcriber.transcribing = (sender, event) => {
+  // 中間結果（ログのみ）
 };
 
-// 連続認識を開始
-recognizer.startContinuousRecognitionAsync();
+// 連続会話文字起こしを開始
+transcriber.startTranscribingAsync();
 ```
 
 ### 10.3 Speech SDK 設定の詳細
 
 | パラメータ | 値 | 理由 |
 |---|---|---|
-| `speechRecognitionLanguage` | `"ja-JP"` | 日本語インタビュー向け |
+| 使用クラス | `ConversationTranscriber` | 話者分離を有効化（`speakerId` 自動付与） |
+| `speechRecognitionLanguage` | `"ja-JP"` / `"en-US"` | 言語トグルに連動 |
 | `AudioConfig` | `fromDefaultMicrophoneInput()` | ブラウザのデフォルトマイクを使用 |
-| 認証方式 | `aad#endpoint#token` | Managed Identity ベースの Entra ID トークン認証 |
+| `SpeechServiceConnection_EndSilenceTimeoutMs` | `"500"` | 500ms の無音でフレーズ確定 |
+| 認証方式 | `TokenCredential` オブジェクト | Managed Identity ベースの Entra ID トークン認証 |
 | エンドポイント形式 | `*.cognitiveservices.azure.com` | Speech SDK が要求するドメイン形式（`services.ai.azure.com` から変換）|
 
-> **設計判断の根拠**: Azure Speech SDK の連続認識（`startContinuousRecognitionAsync`）を使用することで、SDK がマイク入力・WebSocket通信・音声エンコーディングを一括管理する。AudioWorklet や手動のPCM16変換が不要となり、実装がシンプルになる。`recognized` イベントで確定テキスト、`recognizing` イベントで中間結果をリアルタイムに取得できる。
+> **設計判断の根拠**: `ConversationTranscriber` による連続会話文字起こし（`startTranscribingAsync`）を使用することで、SDK がマイク入力・WebSocket通信・音声エンコーディングと話者分離を一括管理する。AudioWorklet や手動のPCM16変換が不要となり、実装がシンプルになる。`transcribed` イベントで確定テキストと `speakerId`、`transcribing` イベントで中間結果をリアルタイムに取得できる。
 
 ---
 
@@ -964,10 +989,13 @@ recognizer.startContinuousRecognitionAsync();
   - `openai.conversations.create()` で会話作成
   - `openai.responses.create(conversation=..., input=..., extra_body={"agent_reference": ...})` でエージェント呼び出し
 
-### 13.2 Azure Speech SDK の連続認識について
+### 13.2 Azure Speech SDK の連続会話文字起こし（話者分離付き）について
 
-- Azure Speech SDK の `startContinuousRecognitionAsync` によりリアルタイム文字起こしを実現
-- `recognized` イベントで確定テキスト、`recognizing` イベントで中間結果を取得
+- Azure Speech SDK の `ConversationTranscriber.startTranscribingAsync` によりリアルタイム文字起こしと話者分離を同時に実現
+- `transcribed` イベントで確定テキストと `speakerId`（`"Guest-1"`, `"Guest-2"`, `"Unknown"`）、`transcribing` イベントで中間結果を取得
+- 話者分離は SDK 内部で自動有効化される（`isSpeakerDiarizationEnabled = true`）ため、追加設定不要
+- 事前の声紋登録は不要。サービスが単一マイクのミックス音声から音声クラスタリングで話者を自動分離
+- Interviewer / Interviewee の属性判別は行わない（エージェントが文脈から推測）
 - SDK がマイク入力・WebSocket通信・音声エンコーディングを一括管理するため、AudioWorklet や手動のPCM16変換は不要
 - CDN 版（`microsoft-cognitiveservices-speech-sdk`）を使用し、npm 依存なしでブラウザで動作
 

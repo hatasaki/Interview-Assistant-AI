@@ -90,13 +90,13 @@ btnStart.addEventListener("click", async () => {
 
     // Start Speech recognition
     try {
-      await startSpeechRecognition((transcript) => {
-        appendTranscript(transcript);
-        sendTranscript(transcript);
+      await startSpeechRecognition(({ text, speakerId }) => {
+        appendTranscript(text, speakerId);
+        sendTranscript(text, speakerId);
       }, getLang());
     } catch (err) {
       console.error("Speech recognition error:", err);
-      appendTranscript("[" + t("speechError") + err.message + "]");
+      appendTranscript("[" + t("speechError") + err.message + "]", "Unknown");
     }
 
     isRunning = true;

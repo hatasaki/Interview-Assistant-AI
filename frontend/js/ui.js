@@ -21,7 +21,7 @@ export function displayIntervieweeInfo(name, affiliation) {
   `;
 }
 
-export function appendTranscript(text) {
+export function appendTranscript(text, speakerId) {
   if (firstTranscript) {
     transcriptArea.innerHTML = "";
     firstTranscript = false;
@@ -30,9 +30,37 @@ export function appendTranscript(text) {
   const ts = now.toTimeString().slice(0, 8);
   const entry = document.createElement("div");
   entry.className = "transcript-entry";
-  entry.textContent = `[${ts}] ${text}`;
+
+  // Speaker indicator dot. Color is derived from speakerId via CSS class.
+  // speakerId examples from ConversationTranscriber: "Guest-1", "Guest-2", "Unknown".
+  const speakerClass = _speakerClass(speakerId);
+  const dot = document.createElement("span");
+  dot.className = `speaker-dot ${speakerClass}`;
+  dot.textContent = "●";
+  if (speakerId) {
+    dot.title = speakerId;
+  }
+
+  const body = document.createElement("span");
+  body.className = "transcript-text";
+  body.textContent = `[${ts}] ${text}`;
+
+  entry.appendChild(dot);
+  entry.appendChild(body);
   transcriptArea.appendChild(entry);
   transcriptArea.scrollTop = transcriptArea.scrollHeight;
+}
+
+function _speakerClass(speakerId) {
+  if (!speakerId || speakerId === "Unknown") return "speaker-unknown";
+  // Extract trailing digit from e.g. "Guest-1" → "1"
+  const m = /(\d+)\s*$/.exec(speakerId);
+  if (m) {
+    // Cycle through 8 colors for Guest-1 .. Guest-N
+    const idx = ((parseInt(m[1], 10) - 1) % 8) + 1;
+    return `speaker-${idx}`;
+  }
+  return "speaker-unknown";
 }
 
 export function displaySuggestion(data) {

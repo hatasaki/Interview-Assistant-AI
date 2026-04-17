@@ -96,12 +96,13 @@ def new_interview_doc(data: InterviewCreate) -> dict:
     }
 
 
-def new_transcript_doc(interview_id: str, text: str, seq: int) -> dict:
+def new_transcript_doc(interview_id: str, text: str, seq: int, speaker_id: str = "") -> dict:
     return {
         "id": _new_id(),
         "interviewId": interview_id,
         "type": "transcript_entry",
         "text": text,
+        "speakerId": speaker_id,
         "timestamp": _utcnow(),
         "sequenceNumber": seq,
     }

@@ -1,6 +1,10 @@
 /**
- * Azure Speech SDK — continuous recognition for transcription.
- * Replaces Voice Live API with direct Azure AI Speech ASR.
+ * Azure Speech SDK — continuous conversation transcription with speaker diarization.
+ *
+ * Uses ConversationTranscriber instead of SpeechRecognizer so that each final
+ * transcription result carries a speakerId (e.g. "Guest-1", "Guest-2",
+ * "Unknown"). Speaker IDs are assigned by the service via voice clustering
+ * from a single microphone input.
  *
  * Noise suppression: The Speech SDK's Microsoft Audio Stack (MAS) is not
  * available in JavaScript/browser environments (C#/C++/Java only).
@@ -8,7 +12,7 @@
  * which is enabled by default in the Speech SDK's fromDefaultMicrophoneInput().
  */
 
-let _recognizer = null;
+let _transcriber = null;
 let _onTranscript = null;
 
 export async function startSpeechRecognition(onTranscript, lang) {
@@ -58,41 +62,43 @@ export async function startSpeechRecognition(onTranscript, lang) {
   );
 
   const audioConfig = sdk.AudioConfig.fromDefaultMicrophoneInput();
-  _recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+  _transcriber = new sdk.ConversationTranscriber(speechConfig, audioConfig);
 
-  // Final recognized result
-  _recognizer.recognized = (_s, e) => {
+  // Final transcription result with speaker identification.
+  // speakerId is assigned by the service (e.g. "Guest-1", "Guest-2", "Unknown").
+  _transcriber.transcribed = (_s, e) => {
     if (e.result.reason === sdk.ResultReason.RecognizedSpeech && e.result.text) {
-      console.log("[Speech] Recognized:", e.result.text);
+      const speakerId = e.result.speakerId || "Unknown";
+      console.log("[Speech] Transcribed:", speakerId, e.result.text);
       if (_onTranscript) {
-        _onTranscript(e.result.text);
+        _onTranscript({ text: e.result.text, speakerId });
       }
     }
   };
 
   // Intermediate (partial) results — log only
-  _recognizer.recognizing = (_s, e) => {
+  _transcriber.transcribing = (_s, e) => {
     if (e.result.text) {
-      console.log("[Speech] Recognizing:", e.result.text);
+      console.log("[Speech] Transcribing:", e.result.speakerId || "Unknown", e.result.text);
     }
   };
 
-  _recognizer.canceled = (_s, e) => {
+  _transcriber.canceled = (_s, e) => {
     console.error("[Speech] Canceled:", e.reason, e.errorDetails);
     if (e.reason === sdk.CancellationReason.Error) {
       console.error("[Speech] Error code:", e.errorCode);
     }
   };
 
-  _recognizer.sessionStopped = () => {
+  _transcriber.sessionStopped = () => {
     console.log("[Speech] Session stopped");
   };
 
-  // Start continuous recognition
+  // Start continuous conversation transcription
   return new Promise((resolve, reject) => {
-    _recognizer.startContinuousRecognitionAsync(
+    _transcriber.startTranscribingAsync(
       () => {
-        console.log("[Speech] Continuous recognition started");
+        console.log("[Speech] Conversation transcription started");
         resolve();
       },
       (err) => {
@@ -104,17 +110,17 @@ export async function startSpeechRecognition(onTranscript, lang) {
 }
 
 export function stopSpeechRecognition() {
-  if (_recognizer) {
-    _recognizer.stopContinuousRecognitionAsync(
+  if (_transcriber) {
+    _transcriber.stopTranscribingAsync(
       () => {
-        console.log("[Speech] Recognition stopped");
-        _recognizer.close();
-        _recognizer = null;
+        console.log("[Speech] Transcription stopped");
+        _transcriber.close();
+        _transcriber = null;
       },
       (err) => {
         console.error("[Speech] Stop error:", err);
-        _recognizer.close();
-        _recognizer = null;
+        _transcriber.close();
+        _transcriber = null;
       }
     );
   }

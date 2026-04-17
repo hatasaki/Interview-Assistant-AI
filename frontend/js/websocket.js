@@ -57,13 +57,20 @@ export function connectWebSocket(
   };
 }
 
-export function sendTranscript(text) {
+export function sendTranscript(text, speakerId) {
   if (_ws?.readyState === WebSocket.OPEN) {
     // Save to DB
-    _ws.send(JSON.stringify({ type: "transcript", text, timestamp: new Date().toISOString() }));
+    _ws.send(JSON.stringify({
+      type: "transcript",
+      text,
+      speakerId: speakerId || "Unknown",
+      timestamp: new Date().toISOString(),
+    }));
 
-    // Buffer for supplementary info
-    _transcriptBuffer.push(text);
+    // Buffer for supplementary info (prefix with speaker so the agent can
+    // distinguish who said what).
+    const speakerPrefix = speakerId && speakerId !== "Unknown" ? `[${speakerId}] ` : "[Unknown] ";
+    _transcriptBuffer.push(`${speakerPrefix}${text}`);
 
     // Reset silence timer
     if (_silenceTimer) clearTimeout(_silenceTimer);
