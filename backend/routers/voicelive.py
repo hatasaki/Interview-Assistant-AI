@@ -1,3 +1,5 @@
+"""Endpoint for acquiring Voice Live API tokens."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter
@@ -12,6 +14,7 @@ _credential = DefaultAzureCredential()
 
 @router.get("/token")
 async def get_voicelive_token():
+    """Return an Entra ID token, endpoint, and model for the Voice Live API."""
     token = _credential.get_token(VOICELIVE_TOKEN_SCOPE)
     return {
         "token": token.token,

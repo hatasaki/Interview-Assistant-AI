@@ -1,3 +1,5 @@
+"""Pydantic models and Cosmos DB document helper functions."""
+
 from __future__ import annotations
 
 import uuid
@@ -8,10 +10,12 @@ from pydantic import BaseModel, Field
 
 
 def _utcnow() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def _new_id() -> str:
+    """Generate a new UUID v4 string."""
     return str(uuid.uuid4())
 
 
@@ -77,6 +81,7 @@ class AgentSuggestion(BaseModel):
 
 
 def new_interview_doc(data: InterviewCreate) -> dict:
+    """Build a new interview metadata document for Cosmos DB."""
     doc_id = _new_id()
     now = _utcnow()
     return {
@@ -97,6 +102,7 @@ def new_interview_doc(data: InterviewCreate) -> dict:
 
 
 def new_transcript_doc(interview_id: str, text: str, seq: int, speaker_id: str = "") -> dict:
+    """Build a new transcript entry document."""
     return {
         "id": _new_id(),
         "interviewId": interview_id,
@@ -109,6 +115,7 @@ def new_transcript_doc(interview_id: str, text: str, seq: int, speaker_id: str =
 
 
 def new_chat_message_doc(interview_id: str, role: str, content: str) -> dict:
+    """Build a new chat message document."""
     return {
         "id": _new_id(),
         "interviewId": interview_id,
@@ -126,6 +133,7 @@ def new_agent_response_doc(
     references: list[dict],
     trigger_transcript_id: str | None = None,
 ) -> dict:
+    """Build a new agent response document."""
     return {
         "id": _new_id(),
         "interviewId": interview_id,
@@ -139,6 +147,7 @@ def new_agent_response_doc(
 
 
 def new_report_doc(interview_id: str) -> dict:
+    """Build a new report document with 'generating' status."""
     return {
         "id": _new_id(),
         "interviewId": interview_id,
@@ -156,6 +165,7 @@ def new_interview_record_doc(
     interview: dict,
     report_markdown: str,
 ) -> dict:
+    """Build a new interview record document for vector search indexing."""
     return {
         "id": interview_id,
         "interviewId": interview_id,

@@ -12,6 +12,7 @@ const intervieweeInfo = document.getElementById("interviewee-info");
 let firstTranscript = true;
 let firstSuggestion = true;
 
+/** Display the interviewee name and affiliation in the header area. */
 export function displayIntervieweeInfo(name, affiliation) {
   intervieweeInfo.innerHTML = `
     <div class="info-display">
@@ -21,6 +22,7 @@ export function displayIntervieweeInfo(name, affiliation) {
   `;
 }
 
+/** Append a timestamped transcript line with a speaker-colored dot. */
 export function appendTranscript(text, speakerId) {
   if (firstTranscript) {
     transcriptArea.innerHTML = "";
@@ -51,6 +53,7 @@ export function appendTranscript(text, speakerId) {
   transcriptArea.scrollTop = transcriptArea.scrollHeight;
 }
 
+/** Map a speakerId (e.g. "Guest-1") to a CSS class for color coding. */
 function _speakerClass(speakerId) {
   if (!speakerId || speakerId === "Unknown") return "speaker-unknown";
   // Extract trailing digit from e.g. "Guest-1" → "1"
@@ -63,6 +66,7 @@ function _speakerClass(speakerId) {
   return "speaker-unknown";
 }
 
+/** Render an agent suggestion card (related info and/or questions). */
 export function displaySuggestion(data) {
   if (firstSuggestion) {
     aiArea.innerHTML = "";
@@ -111,6 +115,7 @@ export function displaySuggestion(data) {
   aiArea.scrollTop = aiArea.scrollHeight;
 }
 
+/** Add reference links to the sidebar, skipping duplicates. */
 export function addReferences(references) {
   for (const ref of references) {
     // Skip duplicates
@@ -130,12 +135,14 @@ export function addReferences(references) {
   }
 }
 
+/** Show the report modal with rendered markdown content. */
 export function displayReport(markdown) {
   const content = document.getElementById("report-content");
   content.innerHTML = renderMarkdown(markdown);
   document.getElementById("report-modal-overlay").hidden = false;
 }
 
+/** Convert markdown [text](url) links in escaped HTML to <a> tags. */
 function renderInlineLinks(escapedHtml) {
   // Convert markdown-style links [text](url) to clickable <a> tags
   // Input is already HTML-escaped, so we need to match escaped brackets
@@ -145,6 +152,7 @@ function renderInlineLinks(escapedHtml) {
   );
 }
 
+/** Minimal markdown-to-HTML renderer for report display. */
 function renderMarkdown(md) {
   let html = escapeHtml(md);
   // Headers
@@ -168,6 +176,7 @@ function renderMarkdown(md) {
   return html;
 }
 
+/** Escape HTML special characters to prevent XSS. */
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;

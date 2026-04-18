@@ -1,3 +1,5 @@
+"""Service for AI Foundry agent interaction, report generation, and embeddings."""
+
 from __future__ import annotations
 
 import json
@@ -13,10 +15,12 @@ from config import AGENT_NAME, AZURE_AI_PROJECT_ENDPOINT, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 
+# Singleton clients (lazy-initialized)
 _project: AIProjectClient | None = None
 _openai = None
 _azure_openai: AzureOpenAI | None = None
 
+# Retry configuration for rate-limited API calls
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 10  # seconds
 
@@ -47,6 +51,7 @@ def _call_with_retry(fn):
             logger.warning("Rate limited (attempt %d/%d), retrying in %ds", attempt + 1, MAX_RETRIES, wait)
             time.sleep(wait)
 
+# ── Agent system prompt (JSON output for real-time interview assistance) ──
 SYSTEM_PROMPT = """\
 あなたはインタビュー補助 AI エージェントです。
 
@@ -83,6 +88,7 @@ SYSTEM_PROMPT = """\
 必ず有効な JSON のみを出力し、他のテキストは含めないこと。
 """
 
+# ── Report prompt template (Japanese) ──
 REPORT_PROMPT_TEMPLATE = """\
 以下のインタビューの文字起こしデータから、エキスパートの暗黙知・ノウハウを最大限に抽出したレポートを生成してください。
 
@@ -156,6 +162,7 @@ REPORT_PROMPT_TEMPLATE = """\
 (インタビューで深掘りしきれなかった、または追加確認が必要なトピック)
 """
 
+# ── Instruction appended when English output is requested ──
 ENGLISH_OUTPUT_INSTRUCTION = (
     "\n\n## Language Instruction\n"
     "You MUST output your entire response in English. "
@@ -163,6 +170,7 @@ ENGLISH_OUTPUT_INSTRUCTION = (
     "Keep the JSON keys unchanged."
 )
 
+# ── Report prompt template (English) ──
 REPORT_PROMPT_TEMPLATE_EN = """\
 Generate a report from the following interview transcript, extracting the expert's tacit knowledge and know-how as thoroughly as possible.
 
@@ -236,6 +244,7 @@ Output the report in the following markdown format. Each section should be as de
 (Topics not fully explored or requiring additional confirmation)
 """
 
+# ── Transcript curation prompt (noise removal while preserving content) ──
 CURATION_PROMPT = """\
 以下のインタビュー文字起こしデータをキュレーションしてください。
 
@@ -267,12 +276,14 @@ CURATION_PROMPT = """\
 - 説明や注釈は一切不要
 """
 
+# Token limits for chunked processing of large transcripts
 TOKEN_LIMIT = 100_000
 CHUNK_SIZE = 90_000
 OVERLAP = 10_000
 
 
 def _get_project() -> AIProjectClient:
+    """Return the shared AIProjectClient, creating it on first call."""
     global _project
     if _project is None:
         _project = AIProjectClient(
@@ -283,6 +294,7 @@ def _get_project() -> AIProjectClient:
 
 
 def _get_openai():
+    """Return the project-scoped OpenAI client for agent and model calls."""
     global _openai
     if _openai is None:
         _openai = _get_project().get_openai_client()

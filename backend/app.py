@@ -1,3 +1,8 @@
+"""FastAPI application entry point.
+
+Manages lifecycle, registers routers, and serves static files.
+"""
+
 import asyncio
 import logging
 import os
@@ -5,16 +10,14 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# NOTE: Per Azure Monitor OpenTelemetry docs, configure_azure_monitor() must
-# be called BEFORE importing FastAPI so the ASGI/HTTP instrumentation can
-# patch the framework. See:
-# https://learn.microsoft.com/troubleshoot/azure/azure-monitor/app-insights/telemetry/opentelemetry-troubleshooting-python
+# OpenTelemetry must be configured before importing FastAPI so that
+# ASGI/HTTP instrumentation patches the framework in time.
 if os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     try:
         from azure.monitor.opentelemetry import configure_azure_monitor
 
         configure_azure_monitor()
-    except Exception:  # pragma: no cover - telemetry must never break the app
+    except Exception:
         logging.getLogger(__name__).exception(
             "Failed to configure Azure Monitor OpenTelemetry"
         )
@@ -34,10 +37,9 @@ _executor = ThreadPoolExecutor(max_workers=20)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Set larger thread pool for asyncio.to_thread
+    """Application lifespan: initialize thread pool and agent on startup."""
     loop = asyncio.get_event_loop()
     loop.set_default_executor(_executor)
-    # Startup: ensure the Foundry agent exists
     try:
         agent_service.ensure_agent()
     except Exception:

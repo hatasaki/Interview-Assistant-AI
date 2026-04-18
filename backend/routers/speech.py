@@ -1,3 +1,5 @@
+"""Endpoint for acquiring Azure Speech Service tokens."""
+
 from __future__ import annotations
 
 from urllib.parse import urlparse
@@ -39,6 +41,7 @@ def _extract_region(endpoint: str) -> str:
 
 @router.get("/token")
 async def get_speech_token():
+    """Return an Entra ID token, region, and endpoint for the Speech SDK."""
     token = _credential.get_token(SPEECH_TOKEN_SCOPE)
     region = _extract_region(AZURE_SPEECH_ENDPOINT)
     return {

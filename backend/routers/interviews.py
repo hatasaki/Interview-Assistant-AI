@@ -1,3 +1,5 @@
+"""REST API router for interview CRUD and report retrieval."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -18,6 +20,7 @@ router = APIRouter(prefix="/api/interviews", tags=["interviews"])
 
 @router.post("", response_model=InterviewOut, status_code=201)
 async def create_interview(data: InterviewCreate):
+    """Create a new interview and persist it to Cosmos DB."""
     doc = new_interview_doc(data)
     result = cosmos_service.create_interview(doc)
     return result
@@ -25,6 +28,7 @@ async def create_interview(data: InterviewCreate):
 
 @router.get("/{interview_id}", response_model=InterviewOut)
 async def get_interview(interview_id: str):
+    """Retrieve an interview by its ID."""
     doc = cosmos_service.get_interview(interview_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Interview not found")
@@ -33,6 +37,7 @@ async def get_interview(interview_id: str):
 
 @router.post("/{interview_id}/start")
 async def start_interview(interview_id: str):
+    """Mark an interview as in-progress and record the start time."""
     doc = cosmos_service.get_interview(interview_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Interview not found")
@@ -45,6 +50,7 @@ async def start_interview(interview_id: str):
 
 @router.post("/{interview_id}/stop")
 async def stop_interview(interview_id: str, background_tasks: BackgroundTasks, lang: str = Query(default="ja")):
+    """Stop the interview and trigger background report generation."""
     doc = cosmos_service.get_interview(interview_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Interview not found")
@@ -61,6 +67,7 @@ async def stop_interview(interview_id: str, background_tasks: BackgroundTasks, l
 
 @router.get("/{interview_id}/report", response_model=ReportOut)
 async def get_report(interview_id: str):
+    """Retrieve the generated report for an interview."""
     report = cosmos_service.get_report(interview_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
@@ -69,6 +76,7 @@ async def get_report(interview_id: str):
 
 @router.get("/{interview_id}/report/status", response_model=ReportStatus)
 async def get_report_status(interview_id: str):
+    """Check the current generation status of a report."""
     report = cosmos_service.get_report(interview_id)
     if not report:
         return ReportStatus(status="not_started")

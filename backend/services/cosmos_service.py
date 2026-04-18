@@ -1,3 +1,5 @@
+"""Data access layer providing CRUD operations for each Cosmos DB container."""
+
 from __future__ import annotations
 
 from azure.cosmos import CosmosClient, PartitionKey
@@ -6,10 +8,12 @@ from azure.identity import DefaultAzureCredential
 from config import AZURE_COSMOS_DB_ENDPOINT, COSMOS_DATABASE_NAME
 
 
+# Singleton Cosmos DB client
 _client: CosmosClient | None = None
 
 
 def _get_client() -> CosmosClient:
+    """Return the shared CosmosClient, creating it on first call."""
     global _client
     if _client is None:
         credential = DefaultAzureCredential()
@@ -18,6 +22,7 @@ def _get_client() -> CosmosClient:
 
 
 def _get_container(container_name: str):
+    """Return a container client for the given container name."""
     db = _get_client().get_database_client(COSMOS_DATABASE_NAME)
     return db.get_container_client(container_name)
 

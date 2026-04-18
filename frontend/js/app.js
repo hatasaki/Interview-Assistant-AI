@@ -38,6 +38,7 @@ let _lastReportMarkdown = "";
 const btnLangJa = document.getElementById("btn-lang-ja");
 const btnLangEn = document.getElementById("btn-lang-en");
 
+/** Sync the active class on language toggle buttons. */
 function _updateLangButtons(lang) {
   btnLangJa.classList.toggle("active", lang === "ja");
   btnLangEn.classList.toggle("active", lang === "en");
@@ -191,6 +192,7 @@ btnCloseReport.addEventListener("click", () => {
 });
 
 // ── Report polling ──
+/** Poll the report status endpoint until generation completes or fails. */
 function pollReportStatus(iid) {
   const interval = setInterval(async () => {
     try {
@@ -209,6 +211,7 @@ function pollReportStatus(iid) {
 }
 
 // ── New Interview ──
+/** Add a "Start New Interview" button to the UI after report is ready. */
 function showNewInterviewButton() {
   const container = document.querySelector(".report-controls");
   if (container.querySelector("#btn-new-interview")) return;

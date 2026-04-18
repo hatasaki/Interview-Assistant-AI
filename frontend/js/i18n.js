@@ -111,10 +111,12 @@ const STORAGE_KEY = "interview-assistant-lang";
 let _currentLang = localStorage.getItem(STORAGE_KEY) || "ja";
 let _onChangeCallbacks = [];
 
+/** Get the current language code ("ja" or "en"). */
 export function getLang() {
   return _currentLang;
 }
 
+/** Switch the active language and notify all registered callbacks. */
 export function setLang(lang) {
   if (lang !== "ja" && lang !== "en") return;
   _currentLang = lang;
@@ -125,10 +127,12 @@ export function setLang(lang) {
   }
 }
 
+/** Look up a translation key for the current language. */
 export function t(key) {
   return translations[_currentLang]?.[key] || translations["ja"][key] || key;
 }
 
+/** Register a callback to be invoked when the language changes. */
 export function onLangChange(callback) {
   _onChangeCallbacks.push(callback);
 }

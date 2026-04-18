@@ -15,6 +15,7 @@
 let _transcriber = null;
 let _onTranscript = null;
 
+/** Start continuous conversation transcription with speaker diarization. */
 export async function startSpeechRecognition(onTranscript, lang) {
   _onTranscript = onTranscript;
   const speechLang = lang === "en" ? "en-US" : "ja-JP";
@@ -30,11 +31,8 @@ export async function startSpeechRecognition(onTranscript, lang) {
     throw new Error("Speech SDK not loaded");
   }
 
-  // For custom domain endpoints (AI Services), use fromEndpoint with a
-  // TokenCredential object for Entra ID authentication.
-  // The SDK source confirms fromEndpoint(URL, TokenCredential) is supported.
-  // Note: services.ai.azure.com is the AI Foundry API domain;
-  // Speech SDK requires cognitiveservices.azure.com for its WebSocket paths.
+  // Connect to custom domain endpoints with Entra ID authentication.
+  // Speech SDK requires cognitiveservices.azure.com WebSocket paths.
   let speechConfig;
   if (endpoint && (endpoint.includes(".cognitiveservices.azure.com") || endpoint.includes(".services.ai.azure.com"))) {
     // Convert services.ai.azure.com → cognitiveservices.azure.com for Speech SDK
@@ -109,6 +107,7 @@ export async function startSpeechRecognition(onTranscript, lang) {
   });
 }
 
+/** Stop the transcriber and release resources. */
 export function stopSpeechRecognition() {
   if (_transcriber) {
     _transcriber.stopTranscribingAsync(

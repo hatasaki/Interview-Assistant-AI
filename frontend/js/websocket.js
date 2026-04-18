@@ -7,11 +7,12 @@ let _onSuggestion = null;
 let _onReferences = null;
 let _onReportReady = null;
 
-// Silence detection for supplementary info
+// Silence detection for supplementary info requests
 let _silenceTimer = null;
 let _transcriptBuffer = [];
-const SILENCE_TIMEOUT = 5000; // 5 seconds of silence triggers supplementary info
+const SILENCE_TIMEOUT = 5000; // ms — triggers supplementary info after silence
 
+/** Connect to the backend WebSocket and register message handlers. */
 export function connectWebSocket(
   interviewId,
   { onSuggestion, onReferences, onReportReady },
@@ -57,6 +58,7 @@ export function connectWebSocket(
   };
 }
 
+/** Send a transcript entry to the server and buffer it for supplementary info. */
 export function sendTranscript(text, speakerId) {
   if (_ws?.readyState === WebSocket.OPEN) {
     // Save to DB
@@ -80,6 +82,7 @@ export function sendTranscript(text, speakerId) {
   }
 }
 
+/** Flush the buffered transcripts as a supplementary info request. */
 function _flushSupplementary() {
   if (_ws?.readyState === WebSocket.OPEN && _transcriptBuffer.length > 0) {
     const buffered = _transcriptBuffer.join("\n");
@@ -88,18 +91,21 @@ function _flushSupplementary() {
   }
 }
 
+/** Send a free-form chat message to the agent. */
 export function sendChatMessage(content) {
   if (_ws?.readyState === WebSocket.OPEN) {
     _ws.send(JSON.stringify({ type: "chat_message", content }));
   }
 }
 
+/** Request the agent to generate follow-up questions. */
 export function sendGenerateQuestions() {
   if (_ws?.readyState === WebSocket.OPEN) {
     _ws.send(JSON.stringify({ type: "generate_questions" }));
   }
 }
 
+/** Close the WebSocket connection. */
 export function disconnectWebSocket() {
   if (_ws) {
     _ws.close();

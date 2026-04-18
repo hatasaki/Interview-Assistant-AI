@@ -1,7 +1,7 @@
 /**
  * Voice Live API connection and transcription.
- * Uses direct WebSocket connection instead of SDK because SDK v1.0.0-beta.3
- * does not serialize input_audio_transcription in the session.update event.
+ * Uses direct WebSocket because the SDK does not serialize
+ * input_audio_transcription in session.update events.
  */
 
 let _ws = null;
@@ -9,6 +9,7 @@ let _audioContext = null;
 let _mediaStream = null;
 let _onTranscript = null;
 
+/** Connect to Voice Live API and start transcription via WebSocket. */
 export async function startVoiceLive(onTranscript, lang) {
   _onTranscript = onTranscript;
   const speechLang = lang === "en" ? "en" : "ja";
@@ -103,6 +104,7 @@ export async function startVoiceLive(onTranscript, lang) {
   });
 }
 
+/** Stop microphone capture and close the Voice Live WebSocket. */
 export function stopVoiceLive() {
   if (_mediaStream) {
     _mediaStream.getTracks().forEach((t) => t.stop());
@@ -118,6 +120,7 @@ export function stopVoiceLive() {
   }
 }
 
+/** Capture microphone audio, convert to PCM16, and stream to the WebSocket. */
 async function _startMicrophoneCapture() {
   console.log("[VL] Requesting microphone access...");
   _mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -153,6 +156,7 @@ async function _startMicrophoneCapture() {
   console.log("[VL] Microphone capture pipeline active.");
 }
 
+/** Convert an ArrayBuffer of PCM16 audio to a base64 string. */
 function _arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = "";

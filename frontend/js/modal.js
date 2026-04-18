@@ -9,6 +9,7 @@ const btnCancel = document.getElementById("btn-cancel-modal");
 
 let _onRegister = null;
 
+/** Initialize the modal: wire up open/close buttons and form submission. */
 export function initModal(onRegister) {
   _onRegister = onRegister;
 

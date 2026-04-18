@@ -24,7 +24,7 @@ if os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         from azure.monitor.opentelemetry import configure_azure_monitor
 
         configure_azure_monitor()
-    except Exception:  # pragma: no cover
+    except Exception:
         logging.getLogger(__name__).exception(
             "Failed to configure Azure Monitor OpenTelemetry"
         )
@@ -47,6 +47,7 @@ _credential = None
 
 
 def _get_credential():
+    """Return the shared DefaultAzureCredential instance."""
     global _credential
     if _credential is None:
         _credential = DefaultAzureCredential()
@@ -54,6 +55,7 @@ def _get_credential():
 
 
 def _get_cosmos_container():
+    """Return the interview_records container client."""
     global _cosmos_client
     if _cosmos_client is None:
         _cosmos_client = CosmosClient(COSMOS_ENDPOINT, credential=_get_credential())
@@ -62,6 +64,7 @@ def _get_cosmos_container():
 
 
 def _get_openai_client():
+    """Return the shared AzureOpenAI client for embedding generation."""
     global _openai_client
     if _openai_client is None:
         # Extract the base endpoint from the project endpoint

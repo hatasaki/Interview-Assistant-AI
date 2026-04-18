@@ -1,3 +1,8 @@
+"""Background interview report generation.
+
+Runs the pipeline: transcript curation -> report generation -> vectorization.
+"""
+
 from __future__ import annotations
 
 import logging

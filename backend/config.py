@@ -1,3 +1,5 @@
+"""Application-wide environment variables and constants."""
+
 import os
 
 

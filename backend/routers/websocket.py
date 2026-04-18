@@ -1,3 +1,8 @@
+"""WebSocket endpoint for real-time communication during interviews.
+
+Handles transcript saving, supplementary info, question generation, and chat.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,11 +22,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_connections: dict[str, list[WebSocket]] = {}
-_seq_counters: dict[str, int] = {}
-_interview_cache: dict[str, dict] = {}
-_initial_done: set[str] = set()
-_lang_cache: dict[str, str] = {}
+# Per-interview WebSocket state
+_connections: dict[str, list[WebSocket]] = {}   # active WS connections per interview
+_seq_counters: dict[str, int] = {}              # transcript sequence numbers
+_interview_cache: dict[str, dict] = {}          # cached interview metadata
+_initial_done: set[str] = set()                 # interviews that completed initial agent call
+_lang_cache: dict[str, str] = {}                # language preference per interview
 
 AGENT_TIMEOUT = 60  # seconds
 
@@ -52,6 +58,7 @@ def _format_transcript_line(t: dict) -> str:
 
 
 async def notify_report_ready(interview_id: str, report_id: str) -> None:
+    """Push a report-ready notification to all connected clients."""
     msg = json.dumps({"type": "report_ready", "reportId": report_id})
     for ws in _connections.get(interview_id, []):
         try:
@@ -62,6 +69,7 @@ async def notify_report_ready(interview_id: str, report_id: str) -> None:
 
 @router.websocket("/ws/interview/{interview_id}")
 async def websocket_endpoint(websocket: WebSocket, interview_id: str, lang: str = Query(default="ja")):
+    """Main WebSocket handler: dispatches incoming messages by type."""
     await websocket.accept()
 
     if interview_id not in _connections:
