@@ -11,7 +11,7 @@ from azure.ai.projects.models import MCPTool, PromptAgentDefinition
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AzureOpenAI, RateLimitError, APIStatusError
 
-from config import AGENT_NAME, AZURE_AI_PROJECT_ENDPOINT, EMBEDDING_MODEL
+from config import AGENT_MODEL, AGENT_NAME, AZURE_AI_PROJECT_ENDPOINT, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -313,7 +313,7 @@ def ensure_agent() -> None:
     project.agents.create_version(
         agent_name=AGENT_NAME,
         definition=PromptAgentDefinition(
-            model="gpt-4o",
+            model=AGENT_MODEL,
             instructions=SYSTEM_PROMPT,
             tools=[mcp_tool],
         ),
@@ -383,7 +383,7 @@ def generate_report(
 
     openai = _get_openai()
     response = _call_with_retry(lambda: openai.responses.create(
-        model="gpt-4o",
+        model=AGENT_MODEL,
         input=prompt,
     ))
 
@@ -426,7 +426,7 @@ def _curate_chunk(text: str) -> str:
     """Use LLM to curate a transcript chunk."""
     openai = _get_openai()
     response = _call_with_retry(lambda: openai.responses.create(
-        model="gpt-4o",
+        model=AGENT_MODEL,
         input=f"{CURATION_PROMPT}\n\n{text}",
     ))
     return response.output_text
@@ -499,7 +499,7 @@ def _denoise_chunk(text: str) -> str:
     """Use LLM to remove noise from a transcript chunk."""
     openai = _get_openai()
     response = _call_with_retry(lambda: openai.responses.create(
-        model="gpt-4o",
+        model=AGENT_MODEL,
         input=(
             "以下のインタビュー文字起こしからノイズを除去してください。\n"
             "- フィラー（えー、あの、うーん等）、意味のない繰り返し、誤認識を削除\n"

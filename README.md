@@ -124,6 +124,18 @@ azd up
 
 After deployment, the app is protected by Microsoft Entra ID authentication. Only users in the same tenant can access the application.
 
+## Changing the Default Model
+
+The agent model (default: `gpt-4o`) and embedding model (default: `text-embedding-3-small`) can be changed via Bicep parameters:
+
+```bash
+azd env set AZURE_AGENT_MODEL gpt-4o-mini
+azd env set AZURE_EMBEDDING_MODEL text-embedding-3-large
+azd up
+```
+
+This updates both the AI Services model deployment and the App Service environment variables.
+
 ## Local Development
 
 ### Backend
@@ -431,6 +443,18 @@ azd up
 5. バックエンドのデプロイ（App Service）+ MCP Serverのデプロイ（Function App）
 
 デプロイ後、アプリは Microsoft Entra ID 認証で保護されます。同一テナントのユーザーのみアクセス可能です。
+
+## デフォルトモデルの変更
+
+エージェントモデル（デフォルト: `gpt-4o`）と Embedding モデル（デフォルト: `text-embedding-3-small`）は Bicep パラメータで変更できます:
+
+```bash
+azd env set AZURE_AGENT_MODEL gpt-4o-mini
+azd env set AZURE_EMBEDDING_MODEL text-embedding-3-large
+azd up
+```
+
+これにより AI Services のモデルデプロイメントと App Service の環境変数の両方が更新されます。
 
 ## ローカル開発
 

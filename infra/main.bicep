@@ -85,6 +85,7 @@ module appService 'modules/app-service.bicep' = {
     cosmosDbAccountName: cosmosDb.outputs.accountName
     aiFoundryEndpoint: aiFoundry.outputs.projectEndpoint
     speechEndpoint: aiFoundry.outputs.aiServicesEndpoint
+    agentModel: agentModel
     embeddingModel: embeddingModel
     authClientId: authClientId
     authClientSecret: authClientSecret
@@ -152,6 +153,7 @@ output AZURE_RESOURCE_GROUP string = rg.name
 output AZURE_COSMOS_DB_ENDPOINT string = cosmosDb.outputs.endpoint
 output AZURE_AI_PROJECT_ENDPOINT string = aiFoundry.outputs.projectEndpoint
 output AZURE_SPEECH_ENDPOINT string = aiFoundry.outputs.aiServicesEndpoint
+output AZURE_AGENT_MODEL string = agentModel
 output AZURE_EMBEDDING_MODEL string = embeddingModel
 output AZURE_WEBAPP_NAME string = appService.outputs.name
 output AZURE_WEBAPP_URL string = appService.outputs.url

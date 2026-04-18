@@ -19,6 +19,9 @@ param aiFoundryEndpoint string
 @description('Azure Speech Service endpoint')
 param speechEndpoint string
 
+@description('Agent model deployment name')
+param agentModel string
+
 @description('Embedding model name')
 param embeddingModel string
 
@@ -76,6 +79,10 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'AZURE_SPEECH_ENDPOINT'
           value: speechEndpoint
+        }
+        {
+          name: 'AZURE_AGENT_MODEL'
+          value: agentModel
         }
         {
           name: 'AZURE_EMBEDDING_MODEL'
