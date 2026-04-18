@@ -45,6 +45,18 @@ module cosmosDb 'modules/cosmos-db.bicep' = {
     name: '${abbrs.documentDBDatabaseAccounts}${resourceToken}'
     location: location
     tags: tags
+    logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
+  }
+}
+
+module monitoring 'modules/monitoring.bicep' = {
+  name: 'monitoring'
+  scope: rg
+  params: {
+    workspaceName: '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
+    appInsightsName: '${abbrs.insightsComponents}${resourceToken}'
+    location: location
+    tags: tags
   }
 }
 
@@ -58,6 +70,7 @@ module aiFoundry 'modules/ai-foundry.bicep' = {
     tags: tags
     agentModel: agentModel
     embeddingModel: embeddingModel
+    logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
   }
 }
 
@@ -75,6 +88,7 @@ module appService 'modules/app-service.bicep' = {
     embeddingModel: embeddingModel
     authClientId: authClientId
     authClientSecret: authClientSecret
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
   }
 }
 
@@ -90,6 +104,7 @@ module mcpFunctionApp 'modules/function-app.bicep' = {
     cosmosDbAccountName: cosmosDb.outputs.accountName
     aiFoundryEndpoint: aiFoundry.outputs.projectEndpoint
     embeddingModel: embeddingModel
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
   }
 }
 
@@ -142,3 +157,5 @@ output AZURE_WEBAPP_NAME string = appService.outputs.name
 output AZURE_WEBAPP_URL string = appService.outputs.url
 output AZURE_MCP_FUNCTION_NAME string = mcpFunctionApp.outputs.name
 output AZURE_MCP_FUNCTION_URL string = mcpFunctionApp.outputs.url
+output AZURE_LOG_ANALYTICS_WORKSPACE_NAME string = monitoring.outputs.workspaceName
+output AZURE_APPLICATION_INSIGHTS_NAME string = monitoring.outputs.appInsightsName

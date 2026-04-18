@@ -7,6 +7,9 @@ param location string
 @description('Tags for the resources')
 param tags object = {}
 
+@description('Log Analytics workspace resource ID for diagnostic settings (empty to skip)')
+param logAnalyticsWorkspaceId string = ''
+
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   name: name
   location: location
@@ -120,6 +123,26 @@ resource reportsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/co
 // by the post-provision script (create-vector-container) because the
 // EnableNoSQLVectorSearch capability requires up to 15 minutes to propagate
 // after account creation. Creating it inline would cause deployment failures.
+
+resource cosmosDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(logAnalyticsWorkspaceId)) {
+  name: 'send-to-log-analytics'
+  scope: cosmosAccount
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logs: [
+      {
+        categoryGroup: 'allLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'Requests'
+        enabled: true
+      }
+    ]
+  }
+}
 
 output accountName string = cosmosAccount.name
 output endpoint string = cosmosAccount.properties.documentEndpoint

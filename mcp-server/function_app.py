@@ -15,6 +15,20 @@ from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 from openai import AzureOpenAI
 
+# Configure Azure Monitor OpenTelemetry for custom traces/logs/metrics.
+# The Functions host emits its own request telemetry when
+# APPLICATIONINSIGHTS_CONNECTION_STRING is set; this call adds OTel-based
+# tracing for Cosmos DB / OpenAI / requests inside user code.
+if os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+
+        configure_azure_monitor()
+    except Exception:  # pragma: no cover
+        logging.getLogger(__name__).exception(
+            "Failed to configure Azure Monitor OpenTelemetry"
+        )
+
 app = func.FunctionApp()
 
 logger = logging.getLogger(__name__)

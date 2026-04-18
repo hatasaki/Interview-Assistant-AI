@@ -6,3 +6,4 @@ azure-identity>=1.17.0
 azure-cosmos>=4.7.0
 openai>=1.0.0
 pydantic>=2.0
+azure-monitor-opentelemetry>=1.8.0

@@ -22,6 +22,9 @@ param aiFoundryEndpoint string
 @description('Embedding model name')
 param embeddingModel string
 
+@description('Application Insights connection string')
+param appInsightsConnectionString string = ''
+
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existing = {
   name: cosmosDbAccountName
 }
@@ -117,6 +120,8 @@ resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
     AZURE_COSMOS_DB_ENDPOINT: cosmosAccount.properties.documentEndpoint
     AZURE_AI_PROJECT_ENDPOINT: aiFoundryEndpoint
     AZURE_EMBEDDING_MODEL: embeddingModel
+    APPLICATIONINSIGHTS_CONNECTION_STRING: appInsightsConnectionString
+    OTEL_RESOURCE_ATTRIBUTES: 'service.name=interview-assistant-mcp'
   }
 }
 

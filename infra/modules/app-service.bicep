@@ -29,6 +29,9 @@ param authClientId string = ''
 @description('Entra ID App Registration client secret for Easy Auth')
 param authClientSecret string = ''
 
+@description('Application Insights connection string')
+param appInsightsConnectionString string = ''
+
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existing = {
   name: cosmosDbAccountName
 }
@@ -93,6 +96,14 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET'
           value: authClientSecret
+        }
+        {
+          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+          value: appInsightsConnectionString
+        }
+        {
+          name: 'OTEL_RESOURCE_ATTRIBUTES'
+          value: 'service.name=interview-assistant-backend'
         }
       ]
       webSocketsEnabled: true

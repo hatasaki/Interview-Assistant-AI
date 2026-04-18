@@ -16,6 +16,9 @@ param agentModel string
 @description('Embedding model name')
 param embeddingModel string
 
+@description('Log Analytics workspace resource ID for diagnostic settings (empty to skip)')
+param logAnalyticsWorkspaceId string = ''
+
 // ── New Foundry resource (Microsoft.CognitiveServices/accounts) ──
 // See: https://learn.microsoft.com/azure/foundry/how-to/create-resource-template
 resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
@@ -89,3 +92,23 @@ output aiServicesEndpoint string = 'https://${aiFoundryResourceName}.services.ai
 output projectName string = aiProject.name
 output projectEndpoint string = 'https://${aiFoundryResourceName}.services.ai.azure.com/api/projects/${aiFoundryProjectName}'
 output embeddingModelName string = embeddingModel
+
+resource aiFoundryDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(logAnalyticsWorkspaceId)) {
+  name: 'send-to-log-analytics'
+  scope: aiFoundry
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logs: [
+      {
+        categoryGroup: 'allLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
+  }
+}

@@ -6,5 +6,7 @@
   "webSitesAppService": "app-",
   "storageAccounts": "st",
   "functionApp": "func-",
-  "functionAppPlan": "fplan-"
+  "functionAppPlan": "fplan-",
+  "operationalInsightsWorkspaces": "log-",
+  "insightsComponents": "appi-"
 }

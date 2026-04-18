@@ -1,8 +1,23 @@
 import asyncio
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# NOTE: Per Azure Monitor OpenTelemetry docs, configure_azure_monitor() must
+# be called BEFORE importing FastAPI so the ASGI/HTTP instrumentation can
+# patch the framework. See:
+# https://learn.microsoft.com/troubleshoot/azure/azure-monitor/app-insights/telemetry/opentelemetry-troubleshooting-python
+if os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+
+        configure_azure_monitor()
+    except Exception:  # pragma: no cover - telemetry must never break the app
+        logging.getLogger(__name__).exception(
+            "Failed to configure Azure Monitor OpenTelemetry"
+        )
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
