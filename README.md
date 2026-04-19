@@ -2,6 +2,8 @@
 
 A browser-based interview assistant web application. It supports the Interviewer through real-time transcription, related information presented by an AI agent, and suggested next questions.
 
+![screen](./asset/image_en.png)
+
 ## Overview
 
 An AI-powered tool designed to help an Interviewer effectively elicit tacit knowledge from an expert Interviewee.
@@ -135,6 +137,61 @@ azd up
 ```
 
 This updates both the AI Services model deployment and the App Service environment variables.
+
+## Changing the Agent MCP Server
+
+The interview assistant agent uses [Microsoft Learn MCP Server](https://learn.microsoft.com/api/mcp) by default to search documentation when explaining technical terms. You can replace it with any remote MCP server supported by [Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol).
+
+Edit `backend/services/agent_service.py` — the `ensure_agent()` function:
+
+```python
+from azure.ai.projects.models import MCPTool
+
+# Default configuration (Microsoft Learn, no auth required)
+mcp_tool = MCPTool(
+    server_label="microsoft_learn",
+    server_url="https://learn.microsoft.com/api/mcp",
+    require_approval="never",
+)
+```
+
+### MCPTool Parameters
+
+| Parameter | Required | Description |
+|---|---|---|
+| `server_label` | Yes | Unique identifier for the MCP server (e.g., `"github"`, `"my_kb"`) |
+| `server_url` | Yes | URL of the remote MCP server endpoint |
+| `require_approval` | No | `"always"` (default), `"never"`, or dict like `{"never": ["tool1"]}` |
+| `allowed_tools` | No | List of tool names the agent can use. If omitted, all tools are available |
+| `project_connection_id` | No | Foundry project connection ID for servers requiring authentication |
+| `headers` | No | Custom HTTP headers (e.g., `{"Authorization": "Bearer <token>"}`) |
+
+### Example: GitHub MCP Server (with authentication)
+
+```python
+mcp_tool = MCPTool(
+    server_label="github",
+    server_url="https://api.githubcopilot.com/mcp",
+    require_approval="always",
+    project_connection_id="my-github-connection",
+)
+```
+
+### Example: Custom MCP Server on Azure Functions
+
+```python
+mcp_tool = MCPTool(
+    server_label="my_custom_tools",
+    server_url="https://<function-app>.azurewebsites.net/runtime/webhooks/mcp",
+    require_approval="never",
+    allowed_tools=["search_documents", "get_summary"],
+    headers={"x-functions-key": "<system-key>"},
+)
+```
+
+After changing the MCP server, also update the **system prompt** (`SYSTEM_PROMPT` in the same file) to match the new tool capabilities. For example, replace `microsoft_docs_search` references with the tool names provided by your new MCP server.
+
+For authenticated MCP servers, create a project connection in the [Foundry portal](https://ai.azure.com) and set the `project_connection_id`. See the [official documentation](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol) for details.
 
 ## Local Development
 
@@ -323,6 +380,8 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 
 ブラウザベースのインタビュー補助 Web アプリケーション。リアルタイム文字起こし・AI エージェントによる関連情報提示・次の質問案提示を通じて Interviewer をサポートします。
 
+![screen](./asset/image_jp.png)
+
 ## 概要
 
 エキスパート（Interviewee）の暗黙知をInterviewerが効果的に引き出すための AI 補助ツールです。
@@ -455,6 +514,61 @@ azd up
 ```
 
 これにより AI Services のモデルデプロイメントと App Service の環境変数の両方が更新されます。
+
+## エージェント MCP サーバーの変更
+
+インタビューアシスタントエージェントは、専門用語の解説時にデフォルトで [Microsoft Learn MCP Server](https://learn.microsoft.com/api/mcp) を使用してドキュメントを検索します。[Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol) がサポートする任意のリモート MCP サーバーに変更できます。
+
+`backend/services/agent_service.py` の `ensure_agent()` 関数を編集してください：
+
+```python
+from azure.ai.projects.models import MCPTool
+
+# デフォルト設定（Microsoft Learn、認証不要）
+mcp_tool = MCPTool(
+    server_label="microsoft_learn",
+    server_url="https://learn.microsoft.com/api/mcp",
+    require_approval="never",
+)
+```
+
+### MCPTool パラメータ
+
+| パラメータ | 必須 | 説明 |
+|---|---|---|
+| `server_label` | ○ | MCP サーバーの一意識別子（例: `"github"`, `"my_kb"`） |
+| `server_url` | ○ | リモート MCP サーバーのエンドポイント URL |
+| `require_approval` | × | `"always"`（デフォルト）、`"never"`、または `{"never": ["tool1"]}` 形式の辞書 |
+| `allowed_tools` | × | エージェントが使用できるツール名のリスト。省略時は全ツール利用可能 |
+| `project_connection_id` | × | 認証が必要なサーバー用の Foundry プロジェクト接続 ID |
+| `headers` | × | カスタム HTTP ヘッダー（例: `{"Authorization": "Bearer <token>"}`) |
+
+### 例: GitHub MCP サーバー（認証あり）
+
+```python
+mcp_tool = MCPTool(
+    server_label="github",
+    server_url="https://api.githubcopilot.com/mcp",
+    require_approval="always",
+    project_connection_id="my-github-connection",
+)
+```
+
+### 例: Azure Functions 上のカスタム MCP サーバー
+
+```python
+mcp_tool = MCPTool(
+    server_label="my_custom_tools",
+    server_url="https://<function-app>.azurewebsites.net/runtime/webhooks/mcp",
+    require_approval="never",
+    allowed_tools=["search_documents", "get_summary"],
+    headers={"x-functions-key": "<system-key>"},
+)
+```
+
+MCP サーバーを変更した後、同ファイルの **システムプロンプト**（`SYSTEM_PROMPT`）も新しいツールの機能に合わせて更新してください。例えば、`microsoft_docs_search` への参照を新しい MCP サーバーが提供するツール名に置き換えます。
+
+認証が必要な MCP サーバーの場合は、[Foundry ポータル](https://ai.azure.com)でプロジェクト接続を作成し、`project_connection_id` に指定してください。詳細は[公式ドキュメント](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol)を参照してください。
 
 ## ローカル開発
 

@@ -50,7 +50,6 @@ const translations = {
     reportModalTitle: "インタビューレポート",
 
     // Messages
-    voiceLiveError: "Voice Live 接続エラー: ",
     speechError: "音声認識エラー: ",
     startFailed: "開始に失敗しました: ",
   },
@@ -100,7 +99,6 @@ const translations = {
     reportModalTitle: "Interview Report",
 
     // Messages
-    voiceLiveError: "Voice Live connection error: ",
     speechError: "Speech recognition error: ",
     startFailed: "Failed to start: ",
   },
