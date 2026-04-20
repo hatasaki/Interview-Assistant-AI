@@ -66,6 +66,7 @@ resource agentDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
       name: agentModel
       version: '2024-08-06'
     }
+    versionUpgradeOption: 'NoAutoUpgrade'
   }
 }
 
@@ -84,6 +85,7 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
       name: embeddingModel
       version: '1'
     }
+    versionUpgradeOption: 'NoAutoUpgrade'
   }
 }
 
