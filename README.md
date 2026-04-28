@@ -69,6 +69,12 @@ graph TB
         COSMOS[("interviews / transcripts<br/>agent_responses / reports<br/>interview_records (vector)")]
     end
 
+    subgraph MCPSrv["Azure Functions (Flex Consumption)"]
+        MCP_FN["MCP Server<br/>search_interviews / get_interview_report /<br/>get_interview_details<br/>(/runtime/webhooks/mcp)"]
+    end
+
+    EXT["External MCP Client<br/>(GitHub Copilot / VS Code / etc.)"]
+
     MIC -->|"audio"| SPEECH
     SPEECH -->|"WebSocket (SDK)"| STT
     STT -->|"transcribed text<br/>+ speakerId"| SPEECH
@@ -89,6 +95,10 @@ graph TB
     AGT_SVC --> AGENT_C
     RPT_SVC --> DIRECT
     COS_SVC --> COSMOS
+
+    EXT -->|"MCP Streamable HTTP<br/>(x-functions-key)"| MCP_FN
+    MCP_FN -->|"vector search<br/>(Managed Identity)"| COSMOS
+    MCP_FN -->|"embedding<br/>(Managed Identity)"| AI
 
     BE_WS -->|"agent_suggestion<br/>agent_references"| FE
 ```
@@ -449,6 +459,12 @@ graph TB
         COSMOS[("interviews / transcripts<br/>agent_responses / reports<br/>interview_records (vector)")]
     end
 
+    subgraph MCPSrv["Azure Functions (Flex Consumption)"]
+        MCP_FN["MCP Server<br/>search_interviews / get_interview_report /<br/>get_interview_details<br/>(/runtime/webhooks/mcp)"]
+    end
+
+    EXT["外部 MCP クライアント<br/>(GitHub Copilot / VS Code 等)"]
+
     MIC -->|"音声"| SPEECH_WS
     SPEECH_WS -->|"WebSocket (SDK)"| STT_API
     STT_API -->|"確定テキスト<br/>+ speakerId"| SPEECH_WS
@@ -469,6 +485,10 @@ graph TB
     AGT_SVC --> AGENT_C
     RPT_SVC --> DIRECT
     COS_SVC --> COSMOS
+
+    EXT -->|"MCP Streamable HTTP<br/>(x-functions-key)"| MCP_FN
+    MCP_FN -->|"ベクトル検索<br/>(Managed Identity)"| COSMOS
+    MCP_FN -->|"Embedding<br/>(Managed Identity)"| AI
 
     BE_WS -->|"agent_suggestion<br/>agent_references"| FE
 ```
