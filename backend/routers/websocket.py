@@ -8,9 +8,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import deque
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
+from config import (
+    CHAT_AGENT_NAME,
+    QUESTIONS_AGENT_NAME,
+    RELATED_INFO_AGENT_NAME,
+)
 from models.schemas import (
     new_agent_response_doc,
     new_chat_message_doc,
@@ -28,8 +34,14 @@ _seq_counters: dict[str, int] = {}              # transcript sequence numbers
 _interview_cache: dict[str, dict] = {}          # cached interview metadata
 _initial_done: set[str] = set()                 # interviews that completed initial agent call
 _lang_cache: dict[str, str] = {}                # language preference per interview
+_supplementary_chunks: dict[str, deque[str]] = {}  # rolling window of recent supplementary chunks
+_used_keywords: dict[str, list[str]] = {}       # keywords already explained, per interview
 
 AGENT_TIMEOUT = 60  # seconds
+SUPPLEMENTARY_CHUNK_WINDOW = 5  # number of recent transcript chunks fed to the agent
+QUESTIONS_HISTORY_CHARS = 30000  # transcript tail length used as full history for question generation
+QUESTIONS_RECENT_CHARS = 2000    # transcript tail snippet used to anchor the current topic
+CHAT_HISTORY_CHARS = 20000       # transcript tail length used as history for chat Q&A
 
 
 def _interview_context(interview: dict) -> str:
@@ -89,13 +101,15 @@ async def websocket_endpoint(websocket: WebSocket, interview_id: str, lang: str 
         if interview:
             conv_id = agent_service.create_conversation()
             context_msg = (
-                f"インタビュー開始。\n"
-                f"{_interview_context(interview)}\n\n"
-                f"最初にInterviewerが声掛けするための内容案と最初の質問候補を提示してください。"
+                f"[インタビュー開始]\n\n"
+                f"## インタビュー情報\n{_interview_context(interview)}\n\n"
+                f"上記のインタビュー情報に基づき、最初にInterviewerが声掛けするための"
+                f"内容案を related_info に記述し、最初の質問1個を suggested_questions に設定してください。"
             )
             try:
                 suggestion = await asyncio.to_thread(
-                    agent_service.send_message, conv_id, context_msg, lang
+                    agent_service.send_message,
+                    conv_id, context_msg, QUESTIONS_AGENT_NAME, lang,
                 )
                 await _send_full(websocket, suggestion)
             except Exception as e:
@@ -141,50 +155,106 @@ async def _handle_transcript(interview_id: str, msg: dict) -> None:
 
 
 async def _handle_supplementary(interview_id: str, msg: dict) -> None:
-    """Role 1: Generate supplementary info. Fresh conversation each time."""
+    """Role 1: Generate supplementary info. Fresh conversation each time.
+
+    Aggregates the most recent transcript chunks (rolling window) and passes
+    the list of already-explained keywords so the agent does not repeat
+    relatedInfo for the same terms. When the agent returns no new keywords,
+    nothing is sent to the clients (the UI shows nothing).
+    """
     text = msg.get("text", "")
     if not text or len(text.strip()) < 10:
         return
+
+    # Append to the rolling window of recent supplementary chunks
+    chunks = _supplementary_chunks.setdefault(
+        interview_id, deque(maxlen=SUPPLEMENTARY_CHUNK_WINDOW)
+    )
+    chunks.append(text)
 
     interview = _interview_cache.get(interview_id, {})
     ctx = _interview_context(interview)
     lang = _lang_cache.get(interview_id, "ja")
 
-    conv_id = agent_service.create_conversation()
+    used = _used_keywords.get(interview_id, [])
+
+    # Per-call sections only — the role agent's SYSTEM_PROMPT contains all
+    # detection / dedup / STT-correction / references-consistency rules.
+    if lang == "en":
+        chunk_section_header = "## Recent transcript chunks (oldest -> newest)"
+        used_header = "## Already explained keywords (do NOT explain again)"
+        prefix = "[Transcript / supplementary info request]"
+        no_used_marker = "(none)"
+    else:
+        chunk_section_header = "## 直近の文字起こしチャンク（古い→新しい）"
+        used_header = "## 既に説明済みのキーワード（再度説明しないこと）"
+        prefix = "[文字起こし・補足情報リクエスト]"
+        no_used_marker = "(なし)"
+
+    chunks_text = "\n---\n".join(chunks)
+    used_text = ", ".join(used) if used else no_used_marker
 
     agent_input = (
-        f"[文字起こし・補足情報リクエスト]\n\n"
+        f"{prefix}\n\n"
         f"## インタビュー情報\n{ctx}\n\n"
-        f"## 会話内容\n{text}\n\n"
-        f"上記の会話内容に含まれる専門用語や技術概念を検出し、"
-        f"素人のinterviewerが理解できるよう補足情報を提供してください。"
-        f"suggested_questionsは空配列にしてください。"
+        f"{chunk_section_header}\n{chunks_text}\n\n"
+        f"{used_header}\n{used_text}"
     )
+
+    conv_id = agent_service.create_conversation()
     try:
         suggestion = await asyncio.wait_for(
-            asyncio.to_thread(agent_service.send_message, conv_id, agent_input, lang),
+            asyncio.to_thread(
+                agent_service.send_message,
+                conv_id, agent_input, RELATED_INFO_AGENT_NAME, lang,
+            ),
             timeout=AGENT_TIMEOUT
         )
-        for ws in _connections.get(interview_id, []):
-            refs = suggestion.get("references", [])
-            await ws.send_text(json.dumps({
-                "type": "agent_suggestion",
-                "relatedInfo": suggestion.get("relatedInfo", ""),
-                "suggestedQuestions": [],
-                "references": refs,
-            }, ensure_ascii=False))
-            if refs:
-                await ws.send_text(json.dumps({
-                    "type": "agent_references", "references": refs,
-                }, ensure_ascii=False))
     except asyncio.TimeoutError:
         logger.warning("Supplementary agent call timed out for %s", interview_id)
+        return
     except Exception as e:
         logger.error("Agent supplementary call failed: %s", e)
+        return
+
+    related_info = (suggestion.get("relatedInfo") or "").strip()
+    new_keywords = suggestion.get("keywords", []) or []
+    refs = suggestion.get("references", []) or []
+
+    # Nothing new to show — suppress the card entirely
+    if not related_info:
+        return
+
+    # Merge new keywords into the used list (case-insensitive dedup, preserve order)
+    if new_keywords:
+        used_lower = {k.lower() for k in _used_keywords.setdefault(interview_id, [])}
+        for kw in new_keywords:
+            if not kw:
+                continue
+            if kw.lower() not in used_lower:
+                _used_keywords[interview_id].append(kw)
+                used_lower.add(kw.lower())
+
+    for ws in _connections.get(interview_id, []):
+        await ws.send_text(json.dumps({
+            "type": "agent_suggestion",
+            "relatedInfo": related_info,
+            "suggestedQuestions": [],
+            "references": refs,
+        }, ensure_ascii=False))
+        if refs:
+            await ws.send_text(json.dumps({
+                "type": "agent_references", "references": refs,
+            }, ensure_ascii=False))
 
 
 async def _handle_generate_questions(interview_id: str) -> None:
-    """Role 2: Generate questions. Uses a fresh conversation each time."""
+    """Role 2: Generate three follow-up questions anchored on the current topic.
+
+    Uses a fresh conversation each time. The three questions (deepdive /
+    broaden / challenge) MUST share the same anchor topic — they are
+    differentiated by angle (depth / breadth / criticism), not by subject.
+    """
     transcripts = await asyncio.to_thread(
         cosmos_service.list_transcripts, interview_id
     )
@@ -196,23 +266,35 @@ async def _handle_generate_questions(interview_id: str) -> None:
     ctx = _interview_context(interview)
     lang = _lang_cache.get(interview_id, "ja")
 
-    conv_id = agent_service.create_conversation()
+    full_history = transcript_text[-QUESTIONS_HISTORY_CHARS:]
+    recent_topic = transcript_text[-QUESTIONS_RECENT_CHARS:]
+
+    # Per-call sections only — the questions agent's SYSTEM_PROMPT contains
+    # the central-topic identification, type-specific scopes, and goal-
+    # awareness rules.
+    if lang == "en":
+        history_header = "## Full transcript history (most recent portion)"
+        recent_header = "## Recent dialogue (use this to identify the current topic)"
+        prefix = "[Question generation request]"
+    else:
+        history_header = "## 文字起こし全履歴（直近部分）"
+        recent_header = "## 直近の対話（中心トピック特定用）"
+        prefix = "[質問生成リクエスト]"
 
     agent_input = (
-        f"[質問生成リクエスト]\n\n"
+        f"{prefix}\n\n"
         f"## インタビュー情報\n{ctx}\n\n"
-        f"## 直近の文字起こし履歴\n{transcript_text[-5000:]}\n\n"
-        f"上記のインタビュー情報とゴール、文字起こし履歴に基づいて、"
-        f"次にInterviewerが聞くべき質問案を以下の3種類、各1個ずつ計3個提示してください。\n"
-        f"1. deepdive: 直前の発言を深堀りする質問（具体例や理由、詳細を掘り下げる）\n"
-        f"2. broaden: トピックを広げる質問（関連する別の観点や領域に話を展開する）\n"
-        f"3. challenge: 少し意地悪な質問（前提を疑う、矛盾を突く、例外ケースを問う）\n"
-        f"各質問のtypeフィールドに上記の種別（deepdive/broaden/challenge）を設定してください。"
-        f"related_infoは空文字列にしてください。"
+        f"{history_header}\n{full_history}\n\n"
+        f"{recent_header}\n{recent_topic}"
     )
+
+    conv_id = agent_service.create_conversation()
     try:
         suggestion = await asyncio.wait_for(
-            asyncio.to_thread(agent_service.send_message, conv_id, agent_input, lang),
+            asyncio.to_thread(
+                agent_service.send_message,
+                conv_id, agent_input, QUESTIONS_AGENT_NAME, lang,
+            ),
             timeout=AGENT_TIMEOUT
         )
         for ws in _connections.get(interview_id, []):
@@ -243,20 +325,37 @@ async def _handle_chat_message(interview_id: str, msg: dict) -> None:
     ctx = _interview_context(interview)
     lang = _lang_cache.get(interview_id, "ja")
 
-    conv_id = agent_service.create_conversation()
+    # Per-call sections only — the chat agent's SYSTEM_PROMPT contains the
+    # Q&A behavior rules, meta-question handling, and the rule to NOT fall
+    # into automatic terminology-explanation mode. The user's question is
+    # placed both at the top (priority signal) and at the bottom (recency
+    # signal) so the model anchors its response on it.
+    if lang == "en":
+        prefix = "[Chat question from Interviewer]"
+        question_header = "## Interviewer's question"
+        history_header = "## Transcript history"
+        repeat_header = "## Interviewer's question (re-stated for emphasis)"
+    else:
+        prefix = "[Interviewerからのチャット質問]"
+        question_header = "## Interviewer の質問"
+        history_header = "## 文字起こし履歴"
+        repeat_header = "## Interviewer の質問（再掲・最重要）"
 
     agent_input = (
-        f"[Interviewerからのチャット質問]\n\n"
+        f"{prefix}\n\n"
+        f"{question_header}\n{content}\n\n"
         f"## インタビュー情報\n{ctx}\n\n"
-        f"## 直近の文字起こし履歴\n{transcript_text[-5000:]}\n\n"
-        f"## Interviewerの質問\n{content}\n\n"
-        f"上記の文脈を踏まえてInterviewerの質問に回答し、"
-        f"関連する参照情報があれば提供してください。"
-        f"質問案は不要なのでsuggested_questionsは空配列にしてください。"
+        f"{history_header}\n{transcript_text[-CHAT_HISTORY_CHARS:]}\n\n"
+        f"{repeat_header}\n{content}"
     )
+
+    conv_id = agent_service.create_conversation()
     try:
         suggestion = await asyncio.wait_for(
-            asyncio.to_thread(agent_service.send_message, conv_id, agent_input, lang),
+            asyncio.to_thread(
+                agent_service.send_message,
+                conv_id, agent_input, CHAT_AGENT_NAME, lang,
+            ),
             timeout=AGENT_TIMEOUT
         )
     except asyncio.TimeoutError:

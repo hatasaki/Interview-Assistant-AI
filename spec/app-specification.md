@@ -285,60 +285,80 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 
 ### 4.3 インタビュー補助エージェント
 
-#### エージェント構成
+#### エージェント構成（役割別 3 エージェント）
+
+役割ごとにシステムプロンプトを純化するため、Foundry Agent Service 上に **3 つの役割別エージェント** を作成し、用途に応じて使い分ける構成とする。1 つの巨大なエージェントに複数役割を持たせると、ある役割向けの指示が別の役割で副作用を起こすため。
+
+| エージェント名 | 担当機能 | システムプロンプトの主眼 |
+|---|---|---|
+| `interview-related-info` | 関連情報生成（`_handle_supplementary`） | 直近5チャンクからのキーワード検出、Speech-to-Text 誤認識正規化、既出キーワード除外、references / related_info の整合性 |
+| `interview-questions` | 質問生成 + 初回声掛け（`_handle_generate_questions` + websocket 接続時の初回呼び出し） | 中心トピック特定、deepdive / broaden / challenge の3タイプ別スコープ、ゴール意識、初回モードの挨拶 |
+| `interview-chat` | チャット応答（`_handle_chat_message`） | Q&A モード、メタ質問対応、用語解説モードに走らない、ユーザー質問の最優先 |
+
+3 エージェントの作成・更新は、アプリ起動時に `agent_service.ensure_agent()` が `_AGENT_DEFINITIONS` リストを順次 `create_version` することで行う（idempotent）。
+
+#### 共通仕様
 
 - **サービス**: Microsoft Foundry Agent Service
 - **SDK**: `azure-ai-projects` >= 2.0.0 (Python, Foundry projects new API)
   - 注意: v1.x とは互換性がない。必ず v2.x を使用すること
-- **モデル**: GPT-4o 以上推奨（`gpt-4o` / `gpt-4.1` / `gpt-5` / `gpt-5-mini` 等）
+- **モデル**: GPT-4o 以上推奨（`gpt-4o` / `gpt-4.1` / `gpt-5` / `gpt-5-mini` 等）。3 エージェント共通モデル
 - **エンドポイント形式**: `https://<AIFoundryResourceName>.ai.azure.com/api/projects/<ProjectName>`
-- **ツール**: Microsoft Learn MCP Server
+- **エージェント呼び出し**: 各役割エージェントを `agent_reference` で指定して `openai.responses.create()` を呼ぶ。会話は毎回新規作成（ステートレス）
+- **出力スキーマ**: 全エージェント共通の JSON `{ related_info, keywords, suggested_questions, references }`。役割により使用するフィールドが異なる（未使用フィールドは空にする）
+
+#### MCP ツール（全エージェント共通）
+
+3 つのエージェントはすべて同じナレッジソースを参照する必要があるため、**同一の MCP ツールセット** を共有する。
+
+- **Microsoft Learn MCP Server**:
   - `server_label`: `"microsoft_learn"`
   - `server_url`: `"https://learn.microsoft.com/api/mcp"`
   - `require_approval`: `"never"`（リアルタイム性重視のため自動承認）
   - 利用可能ツール: `microsoft_docs_search`, `microsoft_code_sample_search`, `microsoft_docs_fetch`
 
-#### エージェントのシステムプロンプト（概要）
+#### MCP 集中管理パターン
 
-```
-あなたはインタビュー補助 AI エージェントです。
+MCP サーバー設定の管理を煩雑にしないため、**`config.py` の単一定数 `MCP_SERVERS`** に集約する。`agent_service.py` の `_build_mcp_tools()` がこれを読み込んでツールリストを生成し、`ensure_agent()` がすべての役割エージェントに **同一のツールセット** を割り当てる。
 
-## 役割
-- エキスパート（Interviewee）の暗黙知を引き出すため、素人（Interviewer）をサポートする
-- Microsoft Learn MCP Server を使って関連情報を検索し、Interviewer に提示する
-- Interviewer が次に聞くべき質問案を、背景情報とともに提示する
+- MCP サーバー URL を変更したい場合は `MCP_SERVERS` の 1 行を編集して `azd deploy` するだけで全エージェントに自動反映される
+- MCP サーバーを追加したい場合も `MCP_SERVERS` に要素を追加するのみ
+- 個別エージェントを個別に修正する必要はない
 
-## 制約
-- 提示する情報はすべて素人にわかりやすい平易な表現で記述する
-- 専門用語を使う場合は必ず簡潔な説明を付ける
-- 文字起こしには話者ID（`[Guest-1]`, `[Guest-2]`, `[Unknown]` など）が付与される。Interviewer / Interviewee の属性までは識別されないため、発言者の役割は文脈から推測すること
-- インタビューの時間とゴールを常に意識し、ゴール達成に向けた質問を優先する
+#### 各エージェントの責務概要
 
-## 入力情報
-- Interviewee の名前・所属・関連情報
-- インタビュー時間・ゴール
-- リアルタイムの文字起こし内容
+**1. `interview-related-info`（関連情報生成）**
 
-## 出力形式
-以下を JSON 形式で返す:
-{
-  "related_info": "関連情報の平易な説明",
-  "suggested_questions": [
-    {
-      "question": "次に聞くべき質問",
-      "rationale": "なぜこの質問が重要か（素人向け説明）"
-    }
-  ],
-  "references": [
-    {
-      "title": "参照元ドキュメントタイトル",
-      "url": "https://learn.microsoft.com/..."
-    }
-  ]
-}
-```
+入力プレフィックス: `[文字起こし・補足情報リクエスト]`
 
-#### エージェント呼び出しフロー
+- 直近5チャンクの会話から重要な用語をすべて列挙
+- Speech-to-Text 誤認識を文脈から正規化（例: 「フォラグ」→「RAG」）
+- 既出キーワードリストとの差分で **新規キーワードのみ** を抽出
+- 新規キーワードがあれば素人向け補足説明を `related_info` に記述、`references` に対応 URL を1対1で対応
+- 新規キーワードが無ければ `related_info=""`, `keywords=[]`, `references=[]`（UI には何も表示しない）
+
+**2. `interview-questions`（質問生成 + 初回声掛け）**
+
+入力プレフィックスでモード判別:
+- `[インタビュー開始]`: 初回モード — インタビュー情報から自然な挨拶を `related_info` に、最初の質問1個を `suggested_questions` に
+- `[質問生成リクエスト]`: 質問生成モード — 中心トピックを内部的に特定し、3 タイプ別スコープで質問を生成
+
+3 タイプ別スコープ:
+- **deepdive**: 直近の対話（末尾2,000字）の中心トピックに強く拘束
+- **broaden**: 全履歴（末尾30,000字）+ ゴール + Interviewee 情報を見渡し、未掘削領域・別観点に拡張
+- **challenge**: 中心トピックの前提・矛盾・例外を問う。過去発言との矛盾を全履歴から探して突くことも可
+
+**3. `interview-chat`（チャット Q&A）**
+
+入力プレフィックス: `[Interviewerからのチャット質問]`
+
+- Q&A モード: ユーザーの質問を最優先で読み取り、直接回答する
+- 用語解説モードに**走らない**こと
+- メタ質問（「どこを深掘りすべき？」「次に何を聞くべき？」「要約して」等）には履歴を分析し具体的助言を返す
+- 用語の意味を聞かれた場合のみ MCP で根拠取得して解説
+- 回答そのものを `related_info` に記述、`references` は回答に直接関係するもののみ
+
+#### エージェント呼び出しフロー（実装例）
 
 ```python
 # Foundry Agent Service クライアント初期化
@@ -352,39 +372,44 @@ project = AIProjectClient(
 )
 openai = project.get_openai_client()
 
-# --- エージェントの事前作成（初回セットアップ時のみ） ---
-mcp_tool = MCPTool(
-    server_label="microsoft_learn",
-    server_url="https://learn.microsoft.com/api/mcp",
-    require_approval="never",
-)
+# --- 役割別エージェントの作成（アプリ起動時に ensure_agent() が実行）---
+shared_tools = [
+    MCPTool(
+        server_label=s["label"],
+        server_url=s["url"],
+        require_approval="never",
+    )
+    for s in MCP_SERVERS
+]
+for agent_name, system_prompt in [
+    ("interview-related-info", RELATED_INFO_SYSTEM_PROMPT),
+    ("interview-questions",    QUESTIONS_SYSTEM_PROMPT),
+    ("interview-chat",         CHAT_SYSTEM_PROMPT),
+]:
+    project.agents.create_version(
+        agent_name=agent_name,
+        definition=PromptAgentDefinition(
+            model="gpt-4o",
+            instructions=system_prompt,
+            tools=shared_tools,
+        ),
+    )
 
-agent = project.agents.create_version(
-    agent_name="interview-assistant",
-    definition=PromptAgentDefinition(
-        model="gpt-4o",
-        instructions=SYSTEM_PROMPT,
-        tools=[mcp_tool],
-    ),
-)
-
-# --- アプリ起動時（既存エージェントを取得） ---
-agent = project.agents.get("interview-assistant")
-
-# --- インタビューセッションごとに新しい会話を作成 ---
+# --- インタビューセッションごとに新しい会話を作成し、役割エージェントを呼び出す ---
 conversation = openai.conversations.create()
 response = openai.responses.create(
     conversation=conversation.id,
     input=user_message,
-    extra_body={"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+    extra_body={"agent_reference": {"name": "interview-related-info", "type": "agent_reference"}},
 )
 ```
 
 ### 4.4 Interviewer → AI チャット Q&A
 
-- 中央ペイン下部のチャットボックスで Interviewer がエージェントに直接質問可能
-- 毎回新規の conversation を作成し、インタビュー詳細情報 + 直近の文字起こし履歴（5000文字）+ 質問内容をプロンプトに含めて送信
-- エージェントは質問への**回答と関連する参照情報のみ**を返す（質問案は返さない）
+- 中央ペイン下部のチャットボックスで Interviewer がエージェント (`interview-chat`) に直接質問可能
+- 毎回新規の conversation を作成し、インタビュー詳細情報 + 文字起こし履歴（末尾20,000字）+ 質問内容をプロンプトに含めて送信
+- ユーザー質問はプロンプトの冒頭と末尾に**サンドイッチ配置**（最優先＆直近性のシグナル強化）
+- エージェントは Q&A モードで動作し、用語解説モードに自動で走らない（メタ質問には履歴分析と具体的助言を返す）
 - 応答は中央ペインに「チャット」タイトル付きのカードとして表示
 - 参照情報のリンクは右ペインにも追加される
 
@@ -944,11 +969,10 @@ transcriber.startTranscribingAsync();
 
 ### 11.2 エージェントライフサイクル管理
 
-- エージェントは Foundry プロジェクト内で**事前に作成・設定**しておく方式を推奨
-- アプリ起動時に `project.agents.get(agent_name)` で既存エージェントを取得
-- インタビューセッションごとに `openai.conversations.create()` で新しい会話を作成
+- 役割別 3 エージェント（`interview-related-info` / `interview-questions` / `interview-chat`）はアプリ起動時に `agent_service.ensure_agent()` が `_AGENT_DEFINITIONS` を反復して `create_version()` で**冪等に作成・更新**する
+- インタビューセッションごとに `openai.conversations.create()` で新しい会話を作成（**ステートレス**、Foundry の会話履歴は使用しない）
 - エージェント自体はセッション間で共有される永続リソース
-- レポート生成時は**同一エージェント・別会話**で実行するか、レポート専用エージェントを別途用意
+- レポート生成・キュレーション・ノイズ除去・Embedding は**エージェント経由ではなく直接モデル呼び出し**（`openai.responses.create(model=AGENT_MODEL)`）で実行
 
 ### 11.3 レポート生成の非同期処理
 

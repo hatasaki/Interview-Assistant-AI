@@ -55,21 +55,18 @@ graph TB
     end
 
     subgraph AI["Azure AI Foundry"]
-        AGENT["interview-assistant Agent<br/>(Prompt Agent / GPT-4o)"]
-        ROLE1["Role 1: Supplementary Info<br/>(5s silence → explain terms)"]
-        ROLE2["Role 2: Question Generation<br/>(button → suggest questions)"]
-        ROLE3["Role 3: Chat Q&A<br/>(user question → answer)"]
-        ROLE4["Role 4: Report Generation<br/>(direct model call → Markdown)"]
+        AGENT_RI["interview-related-info<br/>(GPT-4o + MCP)"]
+        AGENT_Q["interview-questions<br/>(GPT-4o + MCP)"]
+        AGENT_C["interview-chat<br/>(GPT-4o + MCP)"]
+        DIRECT["Direct model call<br/>(report / curate / denoise / embedding)"]
         MCP["Microsoft Learn<br/>MCP Server"]
-        AGENT --- ROLE1
-        AGENT --- ROLE2
-        AGENT --- ROLE3
-        AGENT --- ROLE4
-        AGENT -->|"MCP Protocol"| MCP
+        AGENT_RI -->|"MCP Protocol"| MCP
+        AGENT_Q -->|"MCP Protocol"| MCP
+        AGENT_C -->|"MCP Protocol"| MCP
     end
 
     subgraph DB["Azure Cosmos DB"]
-        COSMOS[("interviews / transcripts<br/>agent_responses / reports")]
+        COSMOS[("interviews / transcripts<br/>agent_responses / reports<br/>interview_records (vector)")]
     end
 
     MIC -->|"audio"| SPEECH
@@ -87,7 +84,10 @@ graph TB
     RPT_SVC --> AGT_SVC
     RPT_SVC --> COS_SVC
 
-    AGT_SVC --> AGENT
+    AGT_SVC --> AGENT_RI
+    AGT_SVC --> AGENT_Q
+    AGT_SVC --> AGENT_C
+    RPT_SVC --> DIRECT
     COS_SVC --> COSMOS
 
     BE_WS -->|"agent_suggestion<br/>agent_references"| FE
@@ -140,20 +140,18 @@ This updates both the AI Services model deployment and the App Service environme
 
 ## Changing the Agent MCP Server
 
-The interview assistant agent uses [Microsoft Learn MCP Server](https://learn.microsoft.com/api/mcp) by default to search documentation when explaining technical terms. You can replace it with any remote MCP server supported by [Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol).
-
-Edit `backend/services/agent_service.py` — the `ensure_agent()` function:
+All three role-specialized agents (`interview-related-info`, `interview-questions`, `interview-chat`) share the same MCP tool set. The list of MCP servers is defined as a **single source of truth** in `backend/config.py`:
 
 ```python
-from azure.ai.projects.models import MCPTool
-
-# Default configuration (Microsoft Learn, no auth required)
-mcp_tool = MCPTool(
-    server_label="microsoft_learn",
-    server_url="https://learn.microsoft.com/api/mcp",
-    require_approval="never",
-)
+# backend/config.py
+MCP_SERVERS: list[dict] = [
+    {"label": "microsoft_learn", "url": "https://learn.microsoft.com/api/mcp"},
+]
 ```
+
+On application startup, `agent_service.ensure_agent()` reads `MCP_SERVERS`, builds an `MCPTool` list via `_build_mcp_tools()`, and applies the **same tool list to every role agent** via `create_version()`. To change MCP wiring you only need to edit this list and run `azd deploy` — every agent is updated automatically.
+
+Use [Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol)-supported remote MCP servers.
 
 ### MCPTool Parameters
 
@@ -189,7 +187,7 @@ mcp_tool = MCPTool(
 )
 ```
 
-After changing the MCP server, also update the **system prompt** (`SYSTEM_PROMPT` in the same file) to match the new tool capabilities. For example, replace `microsoft_docs_search` references with the tool names provided by your new MCP server.
+After changing the MCP server, also review the **role-specific SYSTEM_PROMPTs** (`RELATED_INFO_SYSTEM_PROMPT`, `QUESTIONS_SYSTEM_PROMPT`, `CHAT_SYSTEM_PROMPT` in `agent_service.py`) so that any tool-specific guidance (e.g. `microsoft_docs_search`) matches the new MCP server's tools.
 
 For authenticated MCP servers, create a project connection in the [Foundry portal](https://ai.azure.com) and set the `project_connection_id`. See the [official documentation](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol) for details.
 
@@ -269,13 +267,17 @@ npm run dev
 
 ## Three Roles of the Assistant Agent
 
-| Role | Trigger | Behavior |
-|---|---|---|
-| **Supplementary Info** | Pause in conversation (5s silence) | Detects technical terms, searches via MCP Server, displays beginner-friendly explanations |
-| **Question Generation** | "Generate Questions" button | Generates up to 3 question suggestions from the last 5,000 characters of transcript |
-| **Chat** | Send from the chat box | Provides answers and references based on transcript context |
+The app uses **three role-specialized Foundry agents** so that each role has a focused SYSTEM_PROMPT that does not interfere with the others. All three agents share the same MCP tool set (Microsoft Learn).
 
-Each role uses an independent conversation to prevent context bloat.
+| Agent | Trigger | Behavior |
+|---|---|---|
+| `interview-related-info` | Pause in conversation (5s silence) | Detects technical terms / proper nouns / important keywords from the **last 5 transcript chunks**, normalizes Speech-to-Text mis-recognitions (e.g. "foh-rag" → "RAG"), excludes already-explained keywords, and provides beginner-friendly explanations with references |
+| `interview-questions` | "Generate Questions" button + initial greeting on connect | Identifies the current central topic from the recent dialogue (last 2,000 chars) and produces 3 questions (deepdive / broaden / challenge) with type-specific scopes over the **last 30,000 chars** of history. On the first WebSocket connection, generates the initial greeting and first question |
+| `interview-chat` | Send from the chat box | Q&A mode: directly answers the interviewer's question (definitional, meta-question like "what should I dig into?", summary, etc.) using the **last 20,000 chars** of transcript history. Does NOT auto-explain terms unless asked |
+
+Report generation, transcript curation, denoising and embedding use **direct model calls** (no agent), to keep Markdown / curated text outputs free from JSON output constraints.
+
+Each call uses an independent conversation (stateless) to prevent context bloat across roles.
 
 ## Azure Resources
 
@@ -433,27 +435,24 @@ graph TB
     end
 
     subgraph AI["Azure AI Foundry"]
-        AGENT["interview-assistant Agent<br/>(Prompt Agent / GPT-4o)"]
-        ROLE1["Role 1: 補足情報提供<br/>(5秒無音 → 用語解説)"]
-        ROLE2["Role 2: 質問生成<br/>(ボタン → 質問案提示)"]
-        ROLE3["Role 3: チャット Q&A<br/>(質問入力 → 回答)"]
-        ROLE4["Role 4: レポート生成<br/>(直接モデル呼出 → Markdown)"]
+        AGENT_RI["interview-related-info<br/>(GPT-4o + MCP)"]
+        AGENT_Q["interview-questions<br/>(GPT-4o + MCP)"]
+        AGENT_C["interview-chat<br/>(GPT-4o + MCP)"]
+        DIRECT["直接モデル呼び出し<br/>(レポート / curate / denoise / Embedding)"]
         MCP["Microsoft Learn<br/>MCP Server"]
-        AGENT --- ROLE1
-        AGENT --- ROLE2
-        AGENT --- ROLE3
-        AGENT --- ROLE4
-        AGENT -->|"MCP プロトコル"| MCP
+        AGENT_RI -->|"MCP プロトコル"| MCP
+        AGENT_Q -->|"MCP プロトコル"| MCP
+        AGENT_C -->|"MCP プロトコル"| MCP
     end
 
     subgraph DB["Azure Cosmos DB"]
-        COSMOS[("interviews / transcripts<br/>agent_responses / reports")]
+        COSMOS[("interviews / transcripts<br/>agent_responses / reports<br/>interview_records (vector)")]
     end
 
-    MIC -->|"\u97f3\u58f0"| SPEECH_WS
+    MIC -->|"音声"| SPEECH_WS
     SPEECH_WS -->|"WebSocket (SDK)"| STT_API
-    STT_API -->|"\u78ba\u5b9a\u30c6\u30ad\u30b9\u30c8<br/>+ speakerId"| SPEECH_WS
-    SPEECH_WS -->|"\u30c8\u30e9\u30f3\u30b9\u30af\u30ea\u30d7\u30c8 + speakerId"| FE
+    STT_API -->|"確定テキスト<br/>+ speakerId"| SPEECH_WS
+    SPEECH_WS -->|"トランスクリプト + speakerId"| FE
 
     FE -->|"HTTP/WS"| APP
     APP --> R_SP
@@ -465,7 +464,10 @@ graph TB
     RPT_SVC --> AGT_SVC
     RPT_SVC --> COS_SVC
 
-    AGT_SVC --> AGENT
+    AGT_SVC --> AGENT_RI
+    AGT_SVC --> AGENT_Q
+    AGT_SVC --> AGENT_C
+    RPT_SVC --> DIRECT
     COS_SVC --> COSMOS
 
     BE_WS -->|"agent_suggestion<br/>agent_references"| FE
@@ -517,20 +519,18 @@ azd up
 
 ## エージェント MCP サーバーの変更
 
-インタビューアシスタントエージェントは、専門用語の解説時にデフォルトで [Microsoft Learn MCP Server](https://learn.microsoft.com/api/mcp) を使用してドキュメントを検索します。[Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol) がサポートする任意のリモート MCP サーバーに変更できます。
-
-`backend/services/agent_service.py` の `ensure_agent()` 関数を編集してください：
+3 つの役割別エージェント（`interview-related-info` / `interview-questions` / `interview-chat`）はすべて同じ MCP ツールセットを共有します。MCP サーバー定義は **単一の真実の source** として `backend/config.py` に集約されています：
 
 ```python
-from azure.ai.projects.models import MCPTool
-
-# デフォルト設定（Microsoft Learn、認証不要）
-mcp_tool = MCPTool(
-    server_label="microsoft_learn",
-    server_url="https://learn.microsoft.com/api/mcp",
-    require_approval="never",
-)
+# backend/config.py
+MCP_SERVERS: list[dict] = [
+    {"label": "microsoft_learn", "url": "https://learn.microsoft.com/api/mcp"},
+]
 ```
+
+アプリ起動時に `agent_service.ensure_agent()` が `MCP_SERVERS` を読み込み、`_build_mcp_tools()` でツールリストを構築し、`create_version()` で**全ての役割エージェントに同一のツールリスト**を割り当てます。MCP の変更はこのリストを編集して `azd deploy` するだけで全エージェントに自動反映されます。
+
+[Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol) がサポートする任意のリモート MCP サーバーを利用できます。
 
 ### MCPTool パラメータ
 
@@ -566,7 +566,7 @@ mcp_tool = MCPTool(
 )
 ```
 
-MCP サーバーを変更した後、同ファイルの **システムプロンプト**（`SYSTEM_PROMPT`）も新しいツールの機能に合わせて更新してください。例えば、`microsoft_docs_search` への参照を新しい MCP サーバーが提供するツール名に置き換えます。
+MCP サーバーを変更した後、`agent_service.py` の **役割別 SYSTEM_PROMPT**（`RELATED_INFO_SYSTEM_PROMPT`、`QUESTIONS_SYSTEM_PROMPT`、`CHAT_SYSTEM_PROMPT`）も確認し、ツール固有の記述（例: `microsoft_docs_search`）を新しい MCP サーバーが提供するツール名に合わせてください。
 
 認証が必要な MCP サーバーの場合は、[Foundry ポータル](https://ai.azure.com)でプロジェクト接続を作成し、`project_connection_id` に指定してください。詳細は[公式ドキュメント](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol)を参照してください。
 
@@ -646,13 +646,17 @@ npm run dev
 
 ## 補助エージェントの3つの役割
 
-| 役割 | トリガー | 動作 |
-|---|---|---|
-| **補足情報** | 会話の途切れ（5秒無音） | 専門用語を検出しMCP Serverで検索、素人向け解説を表示 |
-| **質問生成** | 「次の質問を生成」ボタン | 直近5000文字の文字起こしから質問案を最大3個生成 |
-| **チャット** | チャットボックスで送信 | 文字起こし文脈を踏まえた回答と参照情報を提示 |
+本アプリでは、各役割の SYSTEM_PROMPT を独立させて相互干渉を防ぐため、Foundry Agent Service 上に **3 つの役割別エージェント** を作成し使い分けます。3 エージェントは同一の MCP ツールセット（Microsoft Learn）を共有します。
 
-各役割は独立した会話（conversation）を使用し、コンテキストの肥大化を防止しています。
+| エージェント | トリガー | 動作 |
+|---|---|---|
+| `interview-related-info` | 会話の途切れ（5秒無音） | **直近 5 チャンク**から専門用語・固有名詞・重要キーワード等を検出し、Speech-to-Text 誤認識を正規化（例: 「フォラグ」→「RAG」）、既出キーワードを除外したうえで素人向け補足説明と参照リンクを提示 |
+| `interview-questions` | 「次の質問を生成」ボタン + WebSocket 初回接続時の声掛け | 直近の対話（末尾2,000字）から中心トピックを内部的に特定し、**末尾30,000字**の履歴を参照して deepdive / broaden / challenge の3質問をタイプ別スコープで生成。初回接続時は挨拶 + 最初の質問を提示 |
+| `interview-chat` | チャットボックスから送信 | Q&A モード: Interviewer の質問（用語の意味、メタ質問「どこを深掘りすべき？」、要約依頼等）に**直接回答**する。**末尾20,000字**の履歴を参照。質問が用語解説を求めない限り自動で用語解説に走らない |
+
+レポート生成・トランスクリプトキュレーション・ノイズ除去・Embedding は、Markdown 出力やキュレーション結果の都合上、**直接モデル呼び出し**を使用します（エージェント経由なし）。
+
+各呼び出しは独立した会話（ステートレス）で実行され、役割間のコンテキスト汚染を防止しています。
 
 ## Azure リソース
 

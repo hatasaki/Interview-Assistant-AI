@@ -30,8 +30,11 @@ graph TB
     end
 
     subgraph Azure_AI["Azure AI Foundry"]
-        AGENT["Foundry Agent<br/>interview-assistant<br/>(Prompt Agent + GPT-4o)"]
-        MCP["MCP Tool<br/>Microsoft Learn<br/>learn.microsoft.com/api/mcp"]
+        AGENT_RI["interview-related-info<br/>(Prompt Agent + GPT-4o)"]
+        AGENT_Q["interview-questions<br/>(Prompt Agent + GPT-4o)"]
+        AGENT_C["interview-chat<br/>(Prompt Agent + GPT-4o)"]
+        DIRECT["直接モデル呼び出し<br/>(レポート / curate / denoise / Embedding)"]
+        MCP["共通 MCP Tool<br/>Microsoft Learn<br/>learn.microsoft.com/api/mcp"]
     end
 
     subgraph Azure_Cosmos["Azure Cosmos DB"]
@@ -67,8 +70,13 @@ graph TB
     RPT_SVC --> AGT_SVC
     RPT_SVC --> COS_SVC
 
-    AGT_SVC -->|"Managed Identity"| AGENT
-    AGENT -->|"MCP Protocol"| MCP
+    AGT_SVC -->|"Managed Identity"| AGENT_RI
+    AGT_SVC -->|"Managed Identity"| AGENT_Q
+    AGT_SVC -->|"Managed Identity"| AGENT_C
+    RPT_SVC -->|"Managed Identity"| DIRECT
+    AGENT_RI -->|"MCP Protocol"| MCP
+    AGENT_Q -->|"MCP Protocol"| MCP
+    AGENT_C -->|"MCP Protocol"| MCP
     COS_SVC -->|"Managed Identity"| DB_INT
     COS_SVC -->|"Managed Identity"| DB_TR
     COS_SVC -->|"Managed Identity"| DB_AR
@@ -109,7 +117,7 @@ sequenceDiagram
     participant FE as Frontend (JS)
     participant Speech as Azure Speech Service
     participant BE_WS as Backend WebSocket
-    participant AGT as Foundry Agent
+    participant AGT as Foundry Agent (役割別 3 つ)
     participant MCP as Microsoft Learn MCP
     participant DB as Cosmos DB
 
@@ -130,13 +138,13 @@ sequenceDiagram
 
     FE->>BE_WS: WebSocket接続 (/ws/interview/{id})
 
-    Note over BE_WS, AGT: 初回接続: エージェント初期化
+    Note over BE_WS, AGT: 初回接続: questions エージェントで挨拶+最初の質問
     BE_WS->>AGT: conversations.create()
     AGT-->>BE_WS: conversation_id
-    BE_WS->>AGT: 初回メッセージ (インタビュー情報 + 最初の質問依頼)
+    BE_WS->>AGT: send_message(QUESTIONS_AGENT_NAME,<br/>"[インタビュー開始] + インタビュー情報")
     AGT->>MCP: microsoft_docs_search (必要に応じて)
     MCP-->>AGT: 検索結果
-    AGT-->>BE_WS: JSON (related_info + suggested_questions + references)
+    AGT-->>BE_WS: JSON (related_info=挨拶 + suggested_questions=[1件])
     BE_WS-->>FE: agent_suggestion メッセージ
 
     Note over User,DB: Phase 3: リアルタイム文字起こしループ
@@ -148,12 +156,15 @@ sequenceDiagram
 
     Note over FE,BE_WS: 5秒間の無音検出 → 補足情報リクエスト
     FE->>BE_WS: {type: "supplementary_info", text: "バッファ結合テキスト"}
+    BE_WS->>BE_WS: rolling deque(maxlen=5) に追加
     BE_WS->>AGT: conversations.create() (新規会話)
-    BE_WS->>AGT: [文字起こし・補足情報リクエスト]
+    BE_WS->>AGT: send_message(RELATED_INFO_AGENT_NAME,<br/>"[文字起こし] + 直近5チャンク + 既出キーワードリスト")
     AGT->>MCP: 専門用語検索 (必要に応じて)
     MCP-->>AGT: ドキュメント情報
-    AGT-->>BE_WS: JSON (related_info + references)
-    BE_WS-->>FE: agent_suggestion (補足情報のみ)
+    AGT-->>BE_WS: JSON (related_info + keywords + references) または空応答
+    BE_WS->>BE_WS: keywords を _used_keywords にマージ
+    BE_WS->>BE_WS: related_info 内のリンク URL を references に自動補完
+    BE_WS-->>FE: agent_suggestion (relatedInfo が空でなければ送信)
     BE_WS-->>FE: agent_references (参照リンク)
 
     Note over User,DB: Phase 4: 手動質問生成
@@ -162,8 +173,8 @@ sequenceDiagram
     BE_WS->>DB: 全文字起こし取得
     DB-->>BE_WS: transcript list
     BE_WS->>AGT: conversations.create() (新規会話)
-    BE_WS->>AGT: [質問生成リクエスト] + 直近の文字起こし
-    AGT-->>BE_WS: JSON (suggested_questions)
+    BE_WS->>AGT: send_message(QUESTIONS_AGENT_NAME,<br/>"[質問生成] + 末尾30000字 + 末尾2000字 (中心トピック特定用)")
+    AGT-->>BE_WS: JSON (suggested_questions: deepdive/broaden/challenge × 3)
     BE_WS-->>FE: agent_suggestion (質問案のみ)
 
     Note over User,DB: Phase 5: チャット質問
@@ -172,10 +183,10 @@ sequenceDiagram
     BE_WS->>DB: 全文字起こし取得
     DB-->>BE_WS: transcript list
     BE_WS->>AGT: conversations.create() (新規会話)
-    BE_WS->>AGT: [Interviewerからのチャット質問] + 文脈
-    AGT->>MCP: 検索 (必要に応じて)
+    BE_WS->>AGT: send_message(CHAT_AGENT_NAME,<br/>"[Q&A] + 質問サンドイッチ配置 + 末尾20000字 + インタビュー情報")
+    AGT->>MCP: 検索 (用語の意味質問など必要時のみ)
     MCP-->>AGT: 結果
-    AGT-->>BE_WS: JSON (related_info + suggested_questions + references)
+    AGT-->>BE_WS: JSON (related_info=回答 + references)
     BE_WS-->>FE: agent_suggestion (cardTitle: チャット)
 
     Note over User,DB: Phase 6: インタビュー終了 + レポート生成
@@ -347,8 +358,9 @@ sequenceDiagram
     App->>App: ThreadPoolExecutor(max_workers=20) 設定
     App->>AGT: ensure_agent()
     AGT->>AGT: AIProjectClient 初期化<br/>(DefaultAzureCredential)
-    AGT->>AGT: agents.create_version()<br/>(interview-assistant エージェント作成/更新)
-    Note over AGT: MCPTool: Microsoft Learn MCP Server<br/>Model: gpt-4o<br/>Instructions: SYSTEM_PROMPT
+    AGT->>AGT: _build_mcp_tools() で MCP_SERVERS から共有ツールリスト構築
+    AGT->>AGT: _AGENT_DEFINITIONS を反復し<br/>3 つの役割エージェントを create_version()
+    Note over AGT: interview-related-info<br/>interview-questions<br/>interview-chat<br/>すべて Model: gpt-4o + 共通 MCP ツール
     App->>App: Static files マウント (backend/static/)
     App->>Process: Ready to serve
 ```
@@ -359,52 +371,62 @@ sequenceDiagram
 
 ### 5.1 エージェント概要
 
-本アプリケーションは **単一の Foundry Prompt Agent**（`interview-assistant`）を使用するが、機能に応じて **3 つの役割（Role）** を使い分ける。各役割は **毎回新規の会話（conversation）を作成** してコンテキスト汚染を防ぐ。
+本アプリケーションは **役割別 3 つの Foundry Prompt Agent** を使用する。それぞれの SYSTEM_PROMPT は役割に純化されており、互いに干渉しないよう分離されている。3 エージェントはすべて同じ MCP ツールセット（Microsoft Learn）を共有する。各役割は **毎回新規の会話（conversation）を作成** してコンテキスト汚染を防ぐ（ステートレス）。
 
 ```mermaid
 graph TB
-    subgraph Agent["Foundry Agent: interview-assistant"]
-        ROLE1["Role 1: 補足情報提供<br/>supplementary_info"]
-        ROLE2["Role 2: 質問生成<br/>generate_questions"]
-        ROLE3["Role 3: チャット回答<br/>chat_message"]
-        INIT["初期化: 最初の声掛け案/<br/>質問候補提示"]
-        REPORT["レポート生成<br/>(直接モデル呼び出し)"]
+    subgraph Agents["Foundry Agents (役割別 3 つ)"]
+        AGT_RI["interview-related-info<br/>関連情報生成"]
+        AGT_Q["interview-questions<br/>質問生成 + 初回声掛け"]
+        AGT_C["interview-chat<br/>チャット Q&A"]
     end
 
-    MCP["Microsoft Learn<br/>MCP Server"]
+    subgraph Direct["直接モデル呼び出し (Agent 経由なし)"]
+        REPORT["レポート生成<br/>generate_report"]
+        CURATE["キュレーション<br/>curate_transcript"]
+        DENOISE["ノイズ除去<br/>_denoise_chunk"]
+        EMBED["Embedding 生成<br/>generate_embedding"]
+    end
 
-    ROLE1 -->|"専門用語検索"| MCP
-    ROLE2 -.->|"必要に応じて"| MCP
-    ROLE3 -->|"質問内容に応じて検索"| MCP
+    MCP["共有 MCP ツール<br/>Microsoft Learn<br/>(MCP_SERVERS で集中管理)"]
 
-    style Agent fill:#f3e5f5,stroke:#7b1fa2
+    AGT_RI -->|"用語の根拠取得"| MCP
+    AGT_Q -.->|"必要に応じて"| MCP
+    AGT_C -.->|"用語質問など必要時のみ"| MCP
+
+    style Agents fill:#f3e5f5,stroke:#7b1fa2
+    style Direct fill:#e1f5fe,stroke:#0288d1
 ```
 
 ### 5.2 各役割の詳細
 
-#### Role 0: 初期化（WebSocket 初回接続時）
+#### Role 0: 初期化（WebSocket 初回接続時、`interview-questions` エージェント）
 
 ```mermaid
 sequenceDiagram
     participant WS as WebSocket Handler
     participant AGT as Agent Service
+    participant Q as interview-questions
 
     Note over WS: WebSocket 初回接続
     WS->>AGT: create_conversation()
     AGT-->>WS: conversation_id
-    WS->>AGT: send_message(conv_id, <br/>"インタビュー開始。<br/>対象者: {name} ({affiliation})<br/>関連情報: {relatedInfo}<br/>時間: {duration}分<br/>ゴール: {goal}<br/><br/>最初の声掛け内容案と質問候補を提示")
-    AGT-->>WS: {relatedInfo, suggestedQuestions, references}
+    WS->>AGT: send_message(conv_id,<br/>"[インタビュー開始] + ## インタビュー情報",<br/>QUESTIONS_AGENT_NAME)
+    AGT->>Q: agent_reference 経由で呼び出し
+    Q-->>AGT: {related_info=挨拶, suggested_questions=[1件]}
+    AGT-->>WS: パース済みレスポンス
     WS-->>WS: クライアントに agent_suggestion 送信
 ```
 
+**担当エージェント**: `interview-questions`（プレフィックス `[インタビュー開始]` でモード判別）
 **トリガー**: WebSocket 初回接続時（`interview_id` が `_initial_done` セットにない場合）
 **入力**: インタビュー情報（対象者名、所属、関連情報、時間、ゴール）
-**出力**: 最初の声掛け内容案 + 初期質問候補
+**出力**: 最初の声掛け内容案（`related_info`）+ 初期質問 1 個（`suggested_questions`）
 **会話管理**: 新規 conversation を作成（この conversation は使い捨て）
 
 ---
 
-#### Role 1: 補足情報提供（`_handle_supplementary`）
+#### Role 1: 関連情報生成（`_handle_supplementary` / `interview-related-info` エージェント）
 
 ```mermaid
 sequenceDiagram
@@ -412,36 +434,62 @@ sequenceDiagram
     participant WS_CLI as websocket.js
     participant WS_SRV as WebSocket Handler
     participant AGT as Agent Service
+    participant RI as interview-related-info
     participant MCP as Microsoft Learn
 
     FE->>WS_CLI: sendTranscript(text)
     WS_CLI->>WS_CLI: バッファに蓄積
     Note over WS_CLI: 5秒間無音を検出<br/>(SILENCE_TIMEOUT)
     WS_CLI->>WS_SRV: {type: "supplementary_info",<br/>text: "バッファ結合テキスト"}
+    WS_SRV->>WS_SRV: rolling deque(maxlen=5) に append
     WS_SRV->>AGT: create_conversation() (新規)
-    WS_SRV->>AGT: send_message(conv_id, <br/>"[文字起こし・補足情報リクエスト]<br/>## インタビュー情報<br/>{context}<br/>## 会話内容<br/>{text}<br/><br/>専門用語を検出し補足情報を提供。<br/>suggested_questionsは空配列に。")
-    AGT->>MCP: microsoft_docs_search (専門用語検索)
-    MCP-->>AGT: ドキュメント情報
-    AGT-->>WS_SRV: JSON応答
-    WS_SRV-->>FE: agent_suggestion<br/>(relatedInfo のみ, questions=[])
-    WS_SRV-->>FE: agent_references<br/>(参照リンク)
+    WS_SRV->>AGT: send_message(conv_id,<br/>"[文字起こし] + ## インタビュー情報<br/> + ## 直近5チャンク + ## 既出キーワードリスト",<br/>RELATED_INFO_AGENT_NAME)
+    AGT->>RI: agent_reference 経由
+    RI->>RI: STEP 1-5: 用語列挙 → STT正規化 → 既出除外 → 新規説明
+    RI->>MCP: microsoft_docs_search (必要に応じて)
+    MCP-->>RI: ドキュメント情報
+    RI-->>AGT: {related_info, keywords, references} or 空応答
+    AGT->>AGT: _merge_inline_links()<br/>related_info 内の URL を references に自動補完
+    AGT-->>WS_SRV: パース済みレスポンス
+    WS_SRV->>WS_SRV: keywords を _used_keywords にマージ
+    alt related_info が空でない
+        WS_SRV-->>FE: agent_suggestion + agent_references
+    else 空応答（新規キーワードなし）
+        Note over WS_SRV,FE: 何も送信しない（UIに表示なし）
+    end
 ```
 
+**担当エージェント**: `interview-related-info`
 **トリガー**: フロントエンドの **5秒間の無音検出**（`SILENCE_TIMEOUT = 5000ms`）
 - `websocket.js` が文字起こしテキストをバッファに蓄積
 - 最後の文字起こしから 5 秒間新しい文字起こしが来なかった場合、バッファを結合して `supplementary_info` メッセージを送信
 - バッファはフラッシュ後にクリアされる
 
 **フィルタ条件**: テキストが 10 文字未満の場合はスキップ
-**入力**: バッファされた文字起こしテキスト + インタビュー情報コンテキスト
-**出力**: 専門用語の補足説明（`relatedInfo`）+ 参照リンク（`references`）。`suggestedQuestions` は空配列
-**会話管理**: 毎回新規 conversation（コンテキスト独立）
-**非同期**: `asyncio.create_task()` で非同期実行（WebSocket ループをブロックしない）
+**入力コンテキスト**:
+- `## インタビュー情報`: 対象者・所属・関連情報・ゴール
+- `## 直近の文字起こしチャンク`: **直近 5 チャンク**（per-interview の `deque(maxlen=SUPPLEMENTARY_CHUNK_WINDOW=5)` で管理）
+- `## 既に説明済みのキーワード`: per-interview に保持された既出キーワードリスト（大文字小文字無視で重複除去、順序保持）
+
+**SYSTEM_PROMPT に含まれるロジック**:
+1. **列挙**: 直近チャンク全体から重要用語（専門用語・製品名・技術概念・人名・組織名・固有名詞・業界用語・略語等）をすべて列挙
+2. **Speech-to-Text 誤認識正規化**: インタビュー情報と文脈に基づいて正式名称に書き換え（例: 「フォラグ」→「RAG」、「ハレシネーション」→「ハルシネーション」）
+3. **既出除外**: 既出キーワードリストに含まれるもの（表記揺れ・略称・別名含む）を除外
+4. **新規キーワードの説明**: 新規キーワードがあれば必ずすべて related_info に説明、`keywords` に正規化後の正式名称で列挙
+5. **空応答**: 新規キーワードがゼロの場合のみ `related_info=""`, `keywords=[]`, `references=[]`
+6. **references / related_info 整合性**: related_info 内のすべてのマークダウンリンク URL を references に対応させる（URL 完全一致、捏造禁止）
+
+**バックエンドのセーフティネット**: `_parse_agent_response` 内の `_merge_inline_links()` が related_info 内の `[text](url)` を正規表現抽出し、references に自動マージ（URL 重複は除去、既存 title 優先）。
+
+**出力**: `relatedInfo` + `keywords` + `references`、`suggestedQuestions=[]` 強制
+**UI 抑制**: `relatedInfo` が空の場合は `agent_suggestion` も `agent_references` も**送信しない**（UI に何も表示されない）
+**会話管理**: 毎回新規 conversation
+**非同期**: `asyncio.create_task()` で非同期実行
 **タイムアウト**: 60 秒（`AGENT_TIMEOUT`）
 
 ---
 
-#### Role 2: 質問生成（`_handle_generate_questions`）
+#### Role 2: 質問生成（`_handle_generate_questions` / `interview-questions` エージェント）
 
 ```mermaid
 sequenceDiagram
@@ -450,29 +498,47 @@ sequenceDiagram
     participant WS_SRV as WebSocket Handler
     participant DB as Cosmos DB
     participant AGT as Agent Service
+    participant Q as interview-questions
 
     User->>FE: 「次の質問を生成」ボタン
     FE->>WS_SRV: {type: "generate_questions"}
     WS_SRV->>DB: list_transcripts(interview_id)
     DB-->>WS_SRV: 全文字起こしリスト
     WS_SRV->>AGT: create_conversation() (新規)
-    WS_SRV->>AGT: send_message(conv_id,<br/>"[質問生成リクエスト]<br/>## インタビュー情報<br/>{context}<br/>## 直近の文字起こし履歴<br/>{last 5000 chars}<br/><br/>次に聞くべき質問案を最大3個提示。<br/>related_infoは空文字列に。")
-    AGT-->>WS_SRV: JSON応答
-    WS_SRV-->>FE: agent_suggestion<br/>(suggestedQuestions のみ, relatedInfo="")
+    WS_SRV->>AGT: send_message(conv_id,<br/>"[質問生成リクエスト]<br/>+ ## インタビュー情報<br/>+ ## 文字起こし全履歴 (末尾30,000字)<br/>+ ## 直近の対話 (末尾2,000字)",<br/>QUESTIONS_AGENT_NAME)
+    AGT->>Q: agent_reference 経由
+    Q->>Q: STEP 1: 直近対話から中心トピック特定 (内部1文)
+    Q->>Q: STEP 2: タイプ別スコープで3質問生成<br/>- deepdive: 直近2000字に強拘束<br/>- broaden: 全履歴+ゴール+Interviewee情報<br/>- challenge: 全履歴を参照、過去発言矛盾も可
+    Q-->>AGT: {suggested_questions: 3件}
+    AGT-->>WS_SRV: パース済みレスポンス
+    WS_SRV-->>FE: agent_suggestion (suggestedQuestions のみ, relatedInfo="")
 ```
 
+**担当エージェント**: `interview-questions`（プレフィックス `[質問生成リクエスト]` でモード判別）
 **トリガー**: Interviewer が **「次の質問を生成」ボタン** をクリック
 - フロントエンドではクリック後 10 秒間ボタンを無効化（連打防止）
 
-**入力**: Cosmos DB から取得した全文字起こしの **直近 5000 文字** + インタビュー情報コンテキスト
-**出力**: 最大 3 個の質問案（`suggestedQuestions`）。`relatedInfo` は空文字列
-**会話管理**: 毎回新規 conversation（コンテキスト独立）
+**入力コンテキスト**:
+- `## インタビュー情報`: 対象者・所属・関連情報・ゴール
+- `## 文字起こし全履歴（直近部分）`: 末尾 **`QUESTIONS_HISTORY_CHARS = 30000` 字**（≒直近 50〜60 分相当）
+- `## 直近の対話`: 末尾 **`QUESTIONS_RECENT_CHARS = 2000` 字**（中心トピック特定用）
+
+**SYSTEM_PROMPT に含まれるロジック**:
+1. **中心トピック特定**: 「直近の対話」から中心トピックを内部的に1文で特定。短すぎる場合は全履歴を遡って文脈補完
+2. **3 タイプの質問をタイプ別スコープで生成**:
+   - **deepdive**: 直近 2,000 字の中心トピックに**強く拘束**、具体例・判断基準・例外を深掘り
+   - **broaden**: 全履歴 30,000 字 + ゴール + Interviewee 関連情報を**見渡し**、未掘削領域・別観点・ゴール上重要な周辺領域に拡張、関連性を rationale で 1 文明示
+   - **challenge**: 中心トピックの前提・矛盾・例外を問う、過去発言との矛盾も全履歴から探して突くことが可
+3. **共通**: 3 つすべて中心トピックと何らかの関連性を持つこと（無関係な題材への飛躍禁止）、ゴール達成と暗黙知抽出を最優先
+
+**出力**: `suggestedQuestions` 3 件（deepdive / broaden / challenge を 1 つずつ）、`relatedInfo=""`, `keywords=[]`, `references=[]` 強制
+**会話管理**: 毎回新規 conversation
 **非同期**: `asyncio.create_task()` で非同期実行
 **タイムアウト**: 60 秒
 
 ---
 
-#### Role 3: チャット回答（`_handle_chat_message`）
+#### Role 3: チャット Q&A（`_handle_chat_message` / `interview-chat` エージェント）
 
 ```mermaid
 sequenceDiagram
@@ -481,6 +547,7 @@ sequenceDiagram
     participant WS_SRV as WebSocket Handler
     participant DB as Cosmos DB
     participant AGT as Agent Service
+    participant C as interview-chat
     participant MCP as Microsoft Learn
 
     User->>FE: チャットボックスで質問入力 + 送信
@@ -488,23 +555,42 @@ sequenceDiagram
     WS_SRV->>DB: list_transcripts(interview_id)
     DB-->>WS_SRV: 全文字起こしリスト
     WS_SRV->>AGT: create_conversation() (新規)
-    WS_SRV->>AGT: send_message(conv_id,<br/>"[Interviewerからのチャット質問]<br/>## インタビュー情報<br/>{context}<br/>## 直近の文字起こし履歴<br/>{last 5000 chars}<br/>## Interviewerの質問<br/>{content}<br/><br/>文脈を踏まえて回答し<br/>参照情報があれば提供。")
-    AGT->>MCP: 検索 (必要に応じて)
-    MCP-->>AGT: 結果
-    AGT-->>WS_SRV: JSON応答
-    WS_SRV-->>FE: agent_suggestion<br/>(cardTitle: "チャット")
+    WS_SRV->>AGT: send_message(conv_id,<br/>"[Q&A] ## Interviewerの質問 (冒頭)<br/>+ ## インタビュー情報<br/>+ ## 文字起こし履歴 (末尾20,000字)<br/>+ ## Interviewerの質問 (末尾・再掲)",<br/>CHAT_AGENT_NAME)
+    AGT->>C: agent_reference 経由
+    C->>C: 質問タイプを判別<br/>(用語解説 / メタ質問 / 要約 / その他)
+    C->>MCP: 検索 (用語の意味質問など必要時のみ)
+    MCP-->>C: 結果
+    C-->>AGT: {related_info=回答, references}
+    AGT-->>WS_SRV: パース済みレスポンス
+    WS_SRV-->>FE: agent_suggestion (cardTitle: "チャット")
 ```
 
+**担当エージェント**: `interview-chat`（プレフィックス `[Interviewerからのチャット質問]` で動作）
 **トリガー**: Interviewer が **チャットボックスで質問を入力し送信**（Enter キーまたは送信ボタン）
-**入力**: 質問内容 + 直近の文字起こし 5000 文字 + インタビュー情報コンテキスト
-**出力**: 回答（`relatedInfo`）+ 質問案（`suggestedQuestions`）+ 参照リンク（`references`）。`cardTitle: "チャット"` が付与される
+**入力コンテキスト**:
+- `## Interviewer の質問`（冒頭・最重要）
+- `## インタビュー情報`
+- `## 文字起こし履歴`: 末尾 **`CHAT_HISTORY_CHARS = 20000` 字**
+- `## Interviewer の質問（再掲・最重要）`（末尾、サンドイッチ配置で attention 強化）
+
+**SYSTEM_PROMPT に含まれるルール**:
+- **Q&A モード**: ユーザー質問を最優先で読み取り、その問いに直接回答する
+- **用語解説モードに走らない**: 履歴中に専門用語があっても、質問が用語解説を求めない限り解説しない
+- **質問タイプ別応答指針**:
+  - 用語の意味を聞かれた場合: 平易に解説、MCP で根拠取得可
+  - メタ質問（「どこを深掘りすべき？」「次に何を聞くべき？」「要約して」「重要なポイントは？」等）: 履歴を分析し、未掘削トピック・矛盾点・暗黙前提・ゴール上手薄な領域を特定して具体的助言を返す
+  - 要約・整理依頼: 履歴を構造化して返す
+  - その他: 履歴とインタビュー情報から直接回答
+- **キーワード検出ルール非適用**（このエージェントの役割ではない）
+
+**出力**: `relatedInfo` に回答そのもの、`references` は回答に直接関係するもののみ（捏造禁止）、`suggestedQuestions=[]` / `keywords=[]` 強制、`cardTitle: "チャット"`/`"Chat"` 付与
 **会話管理**: 毎回新規 conversation
 **非同期**: `asyncio.create_task()` で非同期実行
 **タイムアウト**: 60 秒
 
 ---
 
-#### Role 4: レポート生成（`report_service.generate_report`）
+#### Role 4: レポート生成（`report_service.generate_report`、直接モデル呼び出し）
 
 ```mermaid
 sequenceDiagram
@@ -550,17 +636,50 @@ sequenceDiagram
 - **チャンク処理**: 推定トークン数が 100,000 を超える場合、90,000 トークンごとに分割（10,000 トークンのオーバーラップ付き）
 - トークン推定: 日本語テキストは約 3 文字 ≈ 1 トークンとして計算
 
-### 5.3 エージェントのシステムプロンプト
+### 5.3 役割別エージェントのシステムプロンプト
 
-エージェントには以下のシステムプロンプトが設定されている:
+各エージェントには専用の SYSTEM_PROMPT が設定されている。共通の出力スキーマ（`related_info` / `keywords` / `suggested_questions` / `references`）を持つが、役割により使用するフィールドが異なる。
 
-| 項目 | 内容 |
-|---|---|
-| 役割 | インタビュー補助 AI エージェント。素人 Interviewer をサポート |
-| 入力プレフィックス認識 | `[文字起こし]` `[Interviewerからの補足質問]` 等のプレフィックスで入力種別を判定 |
-| 出力形式 | 有効な JSON のみ（`related_info`, `suggested_questions`, `references`） |
-| ツール利用 | 入力テキストに専門用語・技術概念がある場合のみ `microsoft_docs_search` で検索 |
-| 制約 | 入力と無関係な情報は返さない。短い/非技術的入力では `related_info` を空にする |
+| エージェント | 役割の主眼 | 主な出力フィールド | MCP ツール利用方針 |
+|---|---|---|---|
+| `interview-related-info` | 直近5チャンクからのキーワード検出、Speech-to-Text 誤認識正規化、既出キーワード除外、references / related_info の整合性 | `related_info` + `keywords` + `references` | 用語の根拠取得のため積極利用 |
+| `interview-questions` | 中心トピック特定、deepdive / broaden / challenge の3タイプ別スコープ、ゴール意識、初回モードの挨拶 | `suggested_questions`（質問生成）または `related_info`=挨拶 + `suggested_questions` 1件（初回） | 必要に応じて利用 |
+| `interview-chat` | Q&A モード、メタ質問対応、用語解説モードに走らない、ユーザー質問の最優先 | `related_info`=回答 + `references` | 質問が用語解説を求めた場合や根拠が必要な場合のみ |
+
+#### MCP ツール集中管理パターン
+
+3 つのエージェントはすべて同じ MCP ツールセット（Microsoft Learn）を共有する。これは `config.py` の単一定数 `MCP_SERVERS` に集約されている：
+
+```python
+# backend/config.py
+MCP_SERVERS: list[dict] = [
+    {"label": "microsoft_learn", "url": "https://learn.microsoft.com/api/mcp"},
+]
+```
+
+`agent_service.py` の `_build_mcp_tools()` がこれを読み込んでツールリストを生成し、`ensure_agent()` が `_AGENT_DEFINITIONS` を反復してすべての役割エージェントに **同一のツールセット** を割り当てる。MCP 設定変更は **1 箇所の編集 + `azd deploy` のみ** で全エージェントに反映される。
+
+```python
+# 抜粋: agent_service.py
+_AGENT_DEFINITIONS: list[tuple[str, str]] = [
+    (RELATED_INFO_AGENT_NAME, RELATED_INFO_SYSTEM_PROMPT),
+    (QUESTIONS_AGENT_NAME, QUESTIONS_SYSTEM_PROMPT),
+    (CHAT_AGENT_NAME, CHAT_SYSTEM_PROMPT),
+]
+
+def ensure_agent() -> None:
+    project = _get_project()
+    tools = _build_mcp_tools()
+    for name, prompt in _AGENT_DEFINITIONS:
+        project.agents.create_version(
+            agent_name=name,
+            definition=PromptAgentDefinition(
+                model=AGENT_MODEL,
+                instructions=prompt,
+                tools=tools,
+            ),
+        )
+```
 
 ### 5.4 エージェント応答のパース処理
 
@@ -571,11 +690,14 @@ flowchart TD
     FENCE -->|Yes| STRIP["開始行と最終行の<br/>```を除去"]
     FENCE -->|No| PARSE
     STRIP --> PARSE["JSON.parse()"]
-    PARSE -->|成功| MAP["フィールドマッピング<br/>related_info → relatedInfo<br/>suggested_questions → suggestedQuestions<br/>references → references"]
-    PARSE -->|失敗| FALLBACK["フォールバック:<br/>relatedInfo = 生テキスト全体<br/>suggestedQuestions = []<br/>references = []"]
-    MAP --> RESULT["パース済み dict"]
-    FALLBACK --> RESULT
+    PARSE -->|成功| MAP["フィールドマッピング<br/>related_info → relatedInfo<br/>keywords → keywords<br/>suggested_questions → suggestedQuestions<br/>references → references"]
+    PARSE -->|失敗| FALLBACK["フォールバック:<br/>relatedInfo = 生テキスト全体<br/>keywords = []<br/>suggestedQuestions = []<br/>references = []"]
+    MAP --> MERGE["_merge_inline_links()<br/>related_info の<br/>マークダウンリンク URL を<br/>references に自動補完"]
+    FALLBACK --> MERGE
+    MERGE --> RESULT["パース済み dict"]
 ```
+
+`_merge_inline_links()` は related_info 内の `[text](url)` を正規表現抽出し、references に存在しない URL を順序保持で追加する（既存の title を優先、URL 重複は除去）。これにより、エージェントが references を埋め忘れても related_info に表示されたリンクは必ず右側パネルにも反映される。
 
 ### 5.5 リトライ制御
 
@@ -1084,9 +1206,18 @@ flowchart TD
 |---|---|
 | Azure Speech SDK を文字起こしに使用 | `ConversationTranscriber.startTranscribingAsync` で連続会話文字起こしと話者分離を同時に実行。SDK がマイク入力・WebSocket通信を管理 |
 | Speech SDK CDN 版使用 | npm 依存なしでブラウザで動作。AudioWorklet/PCM16変換不要 |
-| 毎回新規 conversation を作成 | Role 間のコンテキスト汚染防止。各リクエストは独立した文脈で処理 |
-| レポート生成は直接モデル呼び出し | エージェントの JSON 出力制約が Markdown レポートに不適合 |
-| フロントエンドの無音検出（5秒） | 発話中のエージェント呼び出しを抑制し、まとまった内容で補足情報を生成 |
-| 文字起こし直近 5000 文字のみ使用 | コンテキストウィンドウ制限への対応 |
+| **役割別 3 エージェント分離** | 単一エージェントだと役割固有のルール（キーワード検出 dedup・STT 正規化・references 整合性等）が他役割に副作用を起こす。役割を分離することで各 SYSTEM_PROMPT を純化し、相互干渉を防止 |
+| **MCP 集中管理（`MCP_SERVERS` 定数）** | MCP 設定変更時に各エージェントを個別修正不要。1 箇所の編集で全エージェントに反映 |
+| 毎回新規 conversation を作成 | 役割間および同一役割内のセッション間でのコンテキスト汚染防止。各リクエストは独立した文脈で処理（ステートレス）|
+| レポート生成・curate・denoise・Embedding は直接モデル呼び出し | エージェントの JSON 出力制約が Markdown レポート / クリーンテキスト / 埋め込み入力に不適合 |
+| フロントエンドの無音検出（5秒） | 発話中のエージェント呼び出しを抑制し、まとまった内容で関連情報を生成 |
+| 関連情報生成: **直近 5 チャンク** + 既出キーワードリスト | 1 チャンクのみだとコンテキスト不足で新規キーワードを検出できない。既出リストで重複表示を抑止 |
+| 関連情報生成: 新規キーワードがゼロなら UI 抑制 | 「関連情報なし」表示はユーザーに不要。バックエンドが送信せずフロントの空 card スキップと二重防御 |
+| 関連情報: STT 誤認識正規化 | 文字起こしには「フォラグ」（→「RAG」）等の誤認識が混入。エージェントが文脈から正規化することで正しい用語名で表示 |
+| 関連情報: references / related_info 整合性 + バックエンドセーフティネット | エージェントが references を埋め忘れる場合があるため、バックエンド側で related_info 内のマークダウンリンクを自動補完 |
+| 質問生成: 全履歴 30,000 字 + 直近 2,000 字（中心トピック特定用） | 5,000 字では 8〜10 分相当しか参照できずゴール意識が弱い。30,000 字で 50〜60 分相当をカバー。中心トピック特定は直近 2,000 字を使い、短すぎる場合は履歴遡及可 |
+| 質問生成: タイプ別スコープ（deepdive=直近 / broaden=全履歴+ゴール / challenge=全履歴+矛盾） | 3 タイプを単一スコープで生成すると別話題に分散しがち。タイプ別に参照範囲を変えつつ全タイプが中心トピックと関連性を持つよう制約 |
+| チャット: 末尾 20,000 字 + 質問サンドイッチ配置 | 5,000 字では履歴の長期文脈が反映されない。質問を冒頭・末尾に配置することで attention を強化 |
+| チャット: 用語解説モードに走らない明示 | 専用 SYSTEM_PROMPT で抑止。メタ質問（「どこを深掘りすべき？」等）には履歴分析と具体的助言を返す |
 | トークン推定: 3文字≈1トークン | 日本語テキストの粗い推定。チャンク分割の判定に使用 |
 | Cosmos DB コンテナ分割方式 | クエリパターンの明確さと開発効率を優先 |
