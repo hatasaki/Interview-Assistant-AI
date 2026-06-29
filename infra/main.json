@@ -40,7 +40,7 @@
     },
     "agentModel": {
       "type": "string",
-      "defaultValue": "gpt-4o",
+      "defaultValue": "gpt-5.4-mini",
       "metadata": {
         "description": "Model deployment name for Foundry Agent"
       }
@@ -422,7 +422,7 @@
                 "model": {
                   "format": "OpenAI",
                   "name": "[parameters('agentModel')]",
-                  "version": "2024-08-06"
+                  "version": "2026-03-17"
                 }
               },
               "dependsOn": [

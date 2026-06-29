@@ -16,7 +16,7 @@ param aiFoundryResourceName string = ''
 param aiFoundryProjectName string = ''
 
 @description('Model deployment name for Foundry Agent')
-param agentModel string = 'gpt-4o'
+param agentModel string = 'gpt-5.4-mini'
 
 @description('Embedding model name')
 param embeddingModel string = 'text-embedding-3-small'

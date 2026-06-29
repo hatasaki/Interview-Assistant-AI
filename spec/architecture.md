@@ -30,11 +30,11 @@ graph TB
     end
 
     subgraph Azure_AI["Azure AI Foundry"]
-        AGENT_RI["interview-related-info<br/>(Prompt Agent + GPT-4o)"]
-        AGENT_Q["interview-questions<br/>(Prompt Agent + GPT-4o)"]
-        AGENT_C["interview-chat<br/>(Prompt Agent + GPT-4o)"]
+        AGENT_RI["interview-related-info<br/>(Prompt Agent + gpt-5.4-mini)"]
+        AGENT_Q["interview-questions<br/>(Prompt Agent + gpt-5.4-mini)"]
+        AGENT_C["interview-chat<br/>(Prompt Agent + gpt-5.4-mini)"]
         DIRECT["直接モデル呼び出し<br/>(レポート / curate / denoise / Embedding)"]
-        MCP["共通 MCP Tool<br/>Microsoft Learn<br/>learn.microsoft.com/api/mcp"]
+        MCP["共通ツール<br/>Microsoft Learn MCP + Web Search"]
     end
 
     subgraph Azure_Cosmos["Azure Cosmos DB"]
@@ -358,9 +358,9 @@ sequenceDiagram
     App->>App: ThreadPoolExecutor(max_workers=20) 設定
     App->>AGT: ensure_agent()
     AGT->>AGT: AIProjectClient 初期化<br/>(DefaultAzureCredential)
-    AGT->>AGT: _build_mcp_tools() で MCP_SERVERS から共有ツールリスト構築
+    AGT->>AGT: _build_tools() で MCP_SERVERS + Web Search から共有ツールリスト構築
     AGT->>AGT: _AGENT_DEFINITIONS を反復し<br/>3 つの役割エージェントを create_version()
-    Note over AGT: interview-related-info<br/>interview-questions<br/>interview-chat<br/>すべて Model: gpt-4o + 共通 MCP ツール
+    Note over AGT: interview-related-info<br/>interview-questions<br/>interview-chat<br/>すべて Model: gpt-5.4-mini + Learn MCP + Web Search
     App->>App: Static files マウント (backend/static/)
     App->>Process: Ready to serve
 ```
@@ -616,7 +616,7 @@ sequenceDiagram
 
     Note over RPT,AGT: Step 3: レポート生成
     RPT->>RPT: 質問案を抽出<br/>(_extract_questions)
-    RPT->>AGT: responses.create<br/>(model: gpt-4o,<br/>REPORT_PROMPT_TEMPLATE)
+    RPT->>AGT: responses.create<br/>(model: gpt-5.4-mini,<br/>REPORT_PROMPT_TEMPLATE)
     Note right of AGT: エージェント経由ではなく<br/>直接モデル呼び出し<br/>(暗黙知・ノウハウ抽出に特化)
     AGT-->>RPT: Markdown レポート
 
@@ -631,7 +631,7 @@ sequenceDiagram
 
 **トリガー**: `POST /api/interviews/{id}/stop` 呼び出し時の `BackgroundTasks`
 **特徴**:
-- エージェント経由ではなく **直接モデル呼び出し**（`openai.responses.create(model="gpt-4o")`）を使用。理由: レポートは Markdown 形式で出力する必要があり、エージェントの JSON 出力制約が不適切なため
+- エージェント経由ではなく **直接モデル呼び出し**（`openai.responses.create(model="gpt-5.4-mini")`）を使用。理由: レポートは Markdown 形式で出力する必要があり、エージェントの JSON 出力制約が不適切なため
 - **2段階処理**: (1) ノイズ除去 → (2) レポート生成
 - **チャンク処理**: 推定トークン数が 100,000 を超える場合、90,000 トークンごとに分割（10,000 トークンのオーバーラップ付き）
 - トークン推定: 日本語テキストは約 3 文字 ≈ 1 トークンとして計算
@@ -657,7 +657,7 @@ MCP_SERVERS: list[dict] = [
 ]
 ```
 
-`agent_service.py` の `_build_mcp_tools()` がこれを読み込んでツールリストを生成し、`ensure_agent()` が `_AGENT_DEFINITIONS` を反復してすべての役割エージェントに **同一のツールセット** を割り当てる。MCP 設定変更は **1 箇所の編集 + `azd deploy` のみ** で全エージェントに反映される。
+`agent_service.py` の `_build_tools()` がこれを読み込んで MCP + Web Search ツールリストを生成し、`ensure_agent()` が `_AGENT_DEFINITIONS` を反復してすべての役割エージェントに **同一のツールセット** を割り当てる。ツール設定変更は **1 箇所の編集 + `azd deploy` のみ** で全エージェントに反映される。
 
 ```python
 # 抜粋: agent_service.py
@@ -669,7 +669,7 @@ _AGENT_DEFINITIONS: list[tuple[str, str]] = [
 
 def ensure_agent() -> None:
     project = _get_project()
-    tools = _build_mcp_tools()
+    tools = _build_tools()
     for name, prompt in _AGENT_DEFINITIONS:
         project.agents.create_version(
             agent_name=name,
@@ -1033,7 +1033,7 @@ graph TB
         subgraph AI["Azure AI Foundry"]
             AIF["AI Services<br/>(S0, AIServices kind)"]
             PROJ["Foundry Project"]
-            DEPLOY["Model Deployment<br/>(gpt-4o + text-embedding-3-small)"]
+            DEPLOY["Model Deployment<br/>(gpt-5.4-mini + text-embedding-3-small)"]
         end
 
         subgraph DB["Azure Cosmos DB"]

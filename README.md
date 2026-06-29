@@ -24,7 +24,7 @@ An AI-powered tool designed to help an Interviewer effectively elicit tacit know
 | Backend | Python (FastAPI) on Azure App Service |
 | Real-time Transcription | Azure AI Speech SDK (`ConversationTranscriber`, continuous conversation transcription with speaker diarization) |
 | AI Agent | Microsoft Foundry Agent Service (azure-ai-projects v2) |
-| Agent Tool | Microsoft Learn MCP Server |
+| Agent Tool | Microsoft Learn MCP Server + Foundry Web Search (no Bing resource) |
 | Data Store | Azure Cosmos DB for NoSQL (Serverless) + Vector Search |
 | Embedding | text-embedding-3-small (1536 dimensions) |
 | MCP Server | Azure Functions (Flex Consumption) - Streamable MCP Trigger |
@@ -55,11 +55,11 @@ graph TB
     end
 
     subgraph AI["Azure AI Foundry"]
-        AGENT_RI["interview-related-info<br/>(GPT-4o + MCP)"]
-        AGENT_Q["interview-questions<br/>(GPT-4o + MCP)"]
-        AGENT_C["interview-chat<br/>(GPT-4o + MCP)"]
+        AGENT_RI["interview-related-info<br/>(gpt-5.4-mini + MCP/Web)"]
+        AGENT_Q["interview-questions<br/>(gpt-5.4-mini + MCP/Web)"]
+        AGENT_C["interview-chat<br/>(gpt-5.4-mini + MCP/Web)"]
         DIRECT["Direct model call<br/>(report / curate / denoise / embedding)"]
-        MCP["Microsoft Learn<br/>MCP Server"]
+        MCP["Microsoft Learn MCP<br/>+ Web Search"]
         AGENT_RI -->|"MCP Protocol"| MCP
         AGENT_Q -->|"MCP Protocol"| MCP
         AGENT_C -->|"MCP Protocol"| MCP
@@ -138,10 +138,10 @@ After deployment, the app is protected by Microsoft Entra ID authentication. Onl
 
 ## Changing the Default Model
 
-The agent model (default: `gpt-4o`) and embedding model (default: `text-embedding-3-small`) can be changed via Bicep parameters:
+The agent model (default: `gpt-5.4-mini`) and embedding model (default: `text-embedding-3-small`) can be changed via Bicep parameters:
 
 ```bash
-azd env set AZURE_AGENT_MODEL gpt-4o-mini
+azd env set AZURE_AGENT_MODEL gpt-5-mini
 azd env set AZURE_EMBEDDING_MODEL text-embedding-3-large
 azd up
 ```
@@ -159,7 +159,7 @@ MCP_SERVERS: list[dict] = [
 ]
 ```
 
-On application startup, `agent_service.ensure_agent()` reads `MCP_SERVERS`, builds an `MCPTool` list via `_build_mcp_tools()`, and applies the **same tool list to every role agent** via `create_version()`. To change MCP wiring you only need to edit this list and run `azd deploy` — every agent is updated automatically.
+On application startup, `agent_service.ensure_agent()` reads `MCP_SERVERS`, builds the shared tool list via `_build_tools()` (Microsoft Learn MCP + Foundry Web Search), and applies the **same tool list to every role agent** via `create_version()`. To change tool wiring you only need to edit this builder and run `azd deploy` — every agent is updated automatically.
 
 Use [Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol)-supported remote MCP servers.
 
@@ -382,7 +382,7 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 - **Speech SDK Authentication**: Uses `SpeechConfig.fromEndpoint(URL, TokenCredential)` with Entra ID bearer token. The `services.ai.azure.com` domain is converted to `cognitiveservices.azure.com` for Speech SDK WebSocket compatibility
 - **Noise Suppression**: Browser WebRTC (default `getUserMedia`). Speech SDK's Microsoft Audio Stack (MAS) is not available in JavaScript
 - **Report Generation**: Uses a direct model call instead of going through the agent (to avoid JSON output constraints)
-- **Noise Removal**: Large transcripts are chunked at 90K tokens + 10K overlap and processed by the LLM
+- **Noise Removal**: Large transcripts are chunked at 110K tokens + 5K overlap and processed by the LLM
 - **Transcript Curation**: Before report generation, a dedicated curation agent removes noise and duplicate context while preserving content
 - **Vectorization**: After report generation, curated transcript + details + report are embedded with `text-embedding-3-small` and stored in Cosmos DB for vector search
 
@@ -414,7 +414,7 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 | バックエンド | Python (FastAPI) on Azure App Service |
 | リアルタイム文字起こし | Azure AI Speech SDK（`ConversationTranscriber`、連続会話文字起こし・話者分離）|
 | AI エージェント | Microsoft Foundry Agent Service (azure-ai-projects v2) |
-| エージェントツール | Microsoft Learn MCP Server |
+| エージェントツール | Microsoft Learn MCP Server + Foundry Web Search（Bingリソース不要）|
 | データストア | Azure Cosmos DB for NoSQL (Serverless) + ベクトル検索 |
 | Embedding | text-embedding-3-small (1536次元) |
 | MCP Server | Azure Functions (Flex Consumption) - Streamable MCP Trigger |
@@ -445,11 +445,11 @@ graph TB
     end
 
     subgraph AI["Azure AI Foundry"]
-        AGENT_RI["interview-related-info<br/>(GPT-4o + MCP)"]
-        AGENT_Q["interview-questions<br/>(GPT-4o + MCP)"]
-        AGENT_C["interview-chat<br/>(GPT-4o + MCP)"]
+        AGENT_RI["interview-related-info<br/>(gpt-5.4-mini + MCP/Web)"]
+        AGENT_Q["interview-questions<br/>(gpt-5.4-mini + MCP/Web)"]
+        AGENT_C["interview-chat<br/>(gpt-5.4-mini + MCP/Web)"]
         DIRECT["直接モデル呼び出し<br/>(レポート / curate / denoise / Embedding)"]
-        MCP["Microsoft Learn<br/>MCP Server"]
+        MCP["Microsoft Learn MCP<br/>+ Web Search"]
         AGENT_RI -->|"MCP プロトコル"| MCP
         AGENT_Q -->|"MCP プロトコル"| MCP
         AGENT_C -->|"MCP プロトコル"| MCP
@@ -527,10 +527,10 @@ azd up
 
 ## デフォルトモデルの変更
 
-エージェントモデル（デフォルト: `gpt-4o`）と Embedding モデル（デフォルト: `text-embedding-3-small`）は Bicep パラメータで変更できます:
+エージェントモデル（デフォルト: `gpt-5.4-mini`）と Embedding モデル（デフォルト: `text-embedding-3-small`）は Bicep パラメータで変更できます:
 
 ```bash
-azd env set AZURE_AGENT_MODEL gpt-4o-mini
+azd env set AZURE_AGENT_MODEL gpt-5-mini
 azd env set AZURE_EMBEDDING_MODEL text-embedding-3-large
 azd up
 ```
@@ -548,7 +548,7 @@ MCP_SERVERS: list[dict] = [
 ]
 ```
 
-アプリ起動時に `agent_service.ensure_agent()` が `MCP_SERVERS` を読み込み、`_build_mcp_tools()` でツールリストを構築し、`create_version()` で**全ての役割エージェントに同一のツールリスト**を割り当てます。MCP の変更はこのリストを編集して `azd deploy` するだけで全エージェントに自動反映されます。
+アプリ起動時に `agent_service.ensure_agent()` が `MCP_SERVERS` を読み込み、`_build_tools()` （Microsoft Learn MCP + Foundry Web Search）で共有ツールリストを構築し、`create_version()` で**全ての役割エージェントに同一のツールリスト**を割り当てます。ツールの変更はこのビルダーを編集して `azd deploy` するだけで全エージェントに自動反映されます。
 
 [Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol) がサポートする任意のリモート MCP サーバーを利用できます。
 
@@ -770,6 +770,6 @@ az functionapp keys list \
 - **ノイズ抑制**: ブラウザ WebRTC ノイズ抑制（`getUserMedia` のデフォルト動作）。Speech SDK の Microsoft Audio Stack (MAS) は JavaScript 環境では利用不可
 - **ブラウザ WebSocket 認証**: `authorization` クエリパラメータで Bearer トークンを送信
 - **レポート生成**: エージェント経由ではなく直接モデル呼び出し（JSON 出力制約を回避）
-- **ノイズ除去**: 大量の文字起こしは90Kトークン+10K重複でチャンク分割してLLMで処理
+- **ノイズ除去**: 大量の文字起こしは110Kトークン+5K重複でチャンク分割してLLMで処理
 - **トランスクリプトキュレーション**: レポート生成前に専用キュレーションエージェントがノイズ・重複コンテキストを除去（内容は保持）
 - **ベクトル化**: レポート生成後、キュレーション結果 + 詳細 + レポートを `text-embedding-3-small` でベクトル化しCosmos DBに保存

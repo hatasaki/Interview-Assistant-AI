@@ -17,13 +17,15 @@ RELATED_INFO_AGENT_NAME: str = "interview-related-info"
 QUESTIONS_AGENT_NAME: str = "interview-questions"
 CHAT_AGENT_NAME: str = "interview-chat"
 
-AGENT_MODEL: str = os.environ.get("AZURE_AGENT_MODEL", "gpt-4o")
+AGENT_MODEL: str = os.environ.get("AZURE_AGENT_MODEL", "gpt-5.4-mini")
 EMBEDDING_MODEL: str = os.environ.get("AZURE_EMBEDDING_MODEL", "text-embedding-3-small")
 SPEECH_TOKEN_SCOPE: str = "https://cognitiveservices.azure.com/.default"
 
 # ── MCP servers (shared across all role agents) ──
 # Single source of truth: editing this list updates every agent on the
 # next ensure_agent() call. Add / remove / change URLs here only.
+# (Foundry's built-in Web Search tool is added separately in agent_service
+#  and needs no config — it grounds on Bing without a pre-created resource.)
 MCP_SERVERS: list[dict] = [
     {
         "label": "microsoft_learn",

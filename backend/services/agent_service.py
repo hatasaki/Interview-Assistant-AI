@@ -7,10 +7,11 @@ import logging
 import re
 import time
 
+import tiktoken
 from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import MCPTool, PromptAgentDefinition
+from azure.ai.projects.models import MCPTool, PromptAgentDefinition, WebSearchTool
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-from openai import AzureOpenAI, RateLimitError, APIStatusError
+from openai import AzureOpenAI, BadRequestError, RateLimitError, APIStatusError
 
 from config import (
     AGENT_MODEL,
@@ -63,7 +64,8 @@ def _call_with_retry(fn):
 # ── Role-specialized agent system prompts ──
 # Each Foundry agent gets its own focused SYSTEM_PROMPT so role rules
 # (dedup / STT correction / Q&A behavior etc.) do not bleed into other
-# roles. All three agents share the same MCP tool set (Microsoft Learn).
+# roles. All three agents share the same tool set (Microsoft Learn MCP +
+# Foundry Web Search).
 
 # Role 1: Related-info generation agent
 RELATED_INFO_SYSTEM_PROMPT = """\
@@ -72,7 +74,9 @@ RELATED_INFO_SYSTEM_PROMPT = """\
 ## 役割
 - 入力されたインタビュー会話（直近5チャンク）から、Interviewer が理解しておくべき重要な用語を検出し、素人向けに補足説明を提供する
 - 専門用語・製品名・技術概念だけでなく、人名・組織名・固有名詞・業界用語・略語・キーコンセプト等も対象とする
-- microsoft_docs_search 等の MCP ツールを必要に応じて活用し、説明の根拠とする
+- 2つのツールを適宜使い分けて説明の根拠とする:
+  - **microsoft_docs_search**（Microsoft Learn MCP）: Microsoft / Azure 製品・技術の公式ドキュメント検索
+  - **web_search**（Foundry Web 検索）: 上記以外の用語・人名・組織名・業界用語や、最新情勢・関連ニュースの確認に使用する。引用した出典 URL は references に含める
 
 ## 入力フォーマット
 入力には以下のセクションが含まれる:
@@ -364,6 +368,21 @@ Output the report in the following markdown format. Each section should be as de
 (Topics not fully explored or requiring additional confirmation)
 """
 
+# ── Report condensation prompt (map step for very long transcripts) ──
+REPORT_CONDENSE_PROMPT = """\
+以下はインタビュー文字起こしの一部です。レポート生成の前段として、暗黙知・ノウハウを失わずに圧縮要約してください。
+- 判断基準・手順・数値・固有名詞・事例・失敗談・例外対応は省略せず保持
+- 重複や雑談のみ削減し、内容は具体的に残す
+- 出力は要約テキストのみ（説明不要）
+"""
+
+REPORT_CONDENSE_PROMPT_EN = """\
+This is part of an interview transcript. As a pre-step to report generation, condense it without losing tacit knowledge or know-how.
+- Preserve decision criteria, procedures, numbers, proper nouns, cases, failures, and exception handling
+- Only trim duplication and small talk; keep content specific
+- Output the condensed text only (no explanations)
+"""
+
 # ── Transcript curation prompt (noise removal while preserving content) ──
 CURATION_PROMPT = """\
 以下のインタビュー文字起こしデータをキュレーションしてください。
@@ -396,10 +415,71 @@ CURATION_PROMPT = """\
 - 説明や注釈は一切不要
 """
 
-# Token limits for chunked processing of large transcripts
-TOKEN_LIMIT = 100_000
-CHUNK_SIZE = 90_000
-OVERLAP = 10_000
+# ── Token budgets (gpt-5.4-mini: 272K input / 128K output, reasoning) ──
+MODEL_INPUT_LIMIT = 272_000      # hard model input ceiling
+MODEL_OUTPUT_LIMIT = 128_000     # hard model output ceiling
+REPORT_MAX_OUTPUT = 28_000       # cap report output (incl. reasoning) for predictable cost
+DEFAULT_MAX_OUTPUT = 16_000      # default output cap for curation/denoise
+# Per-call input budget leaves headroom for prompt template + output tokens.
+INPUT_BUDGET = 230_000
+CHUNK_TOKENS = 110_000           # transcript chunk size for map-reduce
+OVERLAP_TOKENS = 5_000
+EMBED_TOKEN_LIMIT = 8_000        # text-embedding-3 input ceiling
+
+_encoding = None
+
+
+def _get_encoding():
+    """Return a cached tiktoken encoding (o200k_base covers gpt-4.1/gpt-5)."""
+    global _encoding
+    if _encoding is None:
+        try:
+            _encoding = tiktoken.get_encoding("o200k_base")
+        except Exception:  # offline / unavailable — sentinel for char fallback
+            _encoding = False
+    return _encoding
+
+
+def _split_by_tokens(text: str, chunk_tokens: int, overlap_tokens: int) -> list[str]:
+    """Split text into token-bounded chunks with overlap, exact via tiktoken."""
+    enc = _get_encoding()
+    if not enc:
+        cc, oc = chunk_tokens * 2, overlap_tokens * 2  # ~2 chars/token fallback
+        out, start = [], 0
+        while start < len(text):
+            out.append(text[start:start + cc])
+            start += cc - oc
+        return out
+    toks = enc.encode(text)
+    out, start = [], 0
+    while start < len(toks):
+        out.append(enc.decode(toks[start:start + chunk_tokens]))
+        start += chunk_tokens - overlap_tokens
+    return out
+
+
+def _create_response(prompt: str, max_output_tokens: int = DEFAULT_MAX_OUTPUT) -> str:
+    """Direct model call with output cap + truncation/content-filter handling."""
+    openai = _get_openai()
+
+    def _call():
+        return openai.responses.create(
+            model=AGENT_MODEL,
+            input=prompt,
+            max_output_tokens=max_output_tokens,
+        )
+
+    try:
+        resp = _call_with_retry(_call)
+    except BadRequestError as e:
+        if getattr(e, "code", None) == "content_filter":
+            logger.error("Request blocked by content filter")
+        raise
+    incomplete = getattr(resp, "incomplete_details", None)
+    reason = getattr(incomplete, "reason", None) if incomplete else None
+    if reason:
+        logger.warning("Model response incomplete: reason=%s", reason)
+    return resp.output_text or ""
 
 
 def _get_project() -> AIProjectClient:
@@ -430,14 +510,15 @@ _AGENT_DEFINITIONS: list[tuple[str, str]] = [
 ]
 
 
-def _build_mcp_tools() -> list[MCPTool]:
-    """Build the shared MCP tool list from the central MCP_SERVERS config.
+def _build_tools() -> list:
+    """Build the shared tool list given to every role agent.
 
-    Single source of truth for MCP wiring — every role agent receives the
-    same tool set. Change MCP_SERVERS in config.py to update all agents
-    on the next ensure_agent() call.
+    Single source of truth for tool wiring: Microsoft Learn (MCP) plus the
+    Foundry Web Search tool. Web Search is the built-in tool that grounds on
+    Bing without a pre-created Grounding-with-Bing resource, so no connection
+    setup is required. Add / change MCP servers via MCP_SERVERS in config.py.
     """
-    return [
+    tools: list = [
         MCPTool(
             server_label=s["label"],
             server_url=s["url"],
@@ -445,16 +526,18 @@ def _build_mcp_tools() -> list[MCPTool]:
         )
         for s in MCP_SERVERS
     ]
+    tools.append(WebSearchTool())
+    return tools
 
 
 def ensure_agent() -> None:
     """Create or update all role-specialized interview agents.
 
     Idempotent: safe to call on every startup. Each agent receives the
-    shared MCP tool set so their knowledge sources stay aligned.
+    shared tool set (Learn MCP + Web Search) so knowledge sources stay aligned.
     """
     project = _get_project()
-    tools = _build_mcp_tools()
+    tools = _build_tools()
     for name, prompt in _AGENT_DEFINITIONS:
         logger.info("Creating/updating agent '%s'", name)
         project.agents.create_version(
@@ -489,6 +572,7 @@ def send_message(
     response = _call_with_retry(lambda: openai.responses.create(
         conversation=conversation_id,
         input=message,
+        max_output_tokens=DEFAULT_MAX_OUTPUT,
         extra_body={
             "agent_reference": {"name": agent_name, "type": "agent_reference"}
         },
@@ -521,7 +605,12 @@ def generate_report(
     # 3. Extract only questions from agent responses (drop relatedInfo)
     questions = _extract_questions(agent_responses)
 
-    # 4. Generate report using direct model call (not agent) to get markdown output
+    # 4. Map-reduce: if the curated transcript still exceeds the per-call input
+    #    budget, summarize chunk-by-chunk first so the final report prompt fits.
+    if _estimate_tokens(transcript_text) > INPUT_BUDGET:
+        transcript_text = _condense_for_report(transcript_text, lang)
+
+    # 5. Generate report using direct model call (not agent) to get markdown output
     template = REPORT_PROMPT_TEMPLATE_EN if lang == "en" else REPORT_PROMPT_TEMPLATE
     none_text = "(None)" if lang == "en" else "(なし)"
     prompt = template.format(
@@ -533,13 +622,21 @@ def generate_report(
         questions=questions or none_text,
     )
 
-    openai = _get_openai()
-    response = _call_with_retry(lambda: openai.responses.create(
-        model=AGENT_MODEL,
-        input=prompt,
-    ))
+    return _create_response(prompt, max_output_tokens=REPORT_MAX_OUTPUT)
 
-    return response.output_text
+
+def _condense_for_report(transcript_text: str, lang: str) -> str:
+    """Map-reduce condense: summarize each chunk preserving tacit knowledge,
+    then recurse until the combined text fits the per-call input budget."""
+    instruction = REPORT_CONDENSE_PROMPT_EN if lang == "en" else REPORT_CONDENSE_PROMPT
+    while _estimate_tokens(transcript_text) > INPUT_BUDGET:
+        chunks = _split_by_tokens(transcript_text, CHUNK_TOKENS, OVERLAP_TOKENS)
+        logger.info("Report transcript too large, condensing %d chunks", len(chunks))
+        parts = [_create_response(f"{instruction}\n\n{c}", max_output_tokens=REPORT_MAX_OUTPUT) for c in chunks]
+        transcript_text = "\n\n".join(parts)
+        if len(chunks) == 1:  # cannot shrink further; avoid infinite loop
+            break
+    return transcript_text
 
 
 def curate_transcript(transcripts: list[dict]) -> str:
@@ -551,19 +648,10 @@ def curate_transcript(transcripts: list[dict]) -> str:
         return ""
 
     estimated = _estimate_tokens(transcript_text)
-    if estimated <= TOKEN_LIMIT:
+    if estimated <= INPUT_BUDGET:
         return _curate_chunk(transcript_text)
 
-    # Chunk large transcripts
-    chunk_chars = CHUNK_SIZE * 3
-    overlap_chars = OVERLAP * 3
-    chunks = []
-    start = 0
-    while start < len(transcript_text):
-        end = start + chunk_chars
-        chunks.append(transcript_text[start:end])
-        start = end - overlap_chars
-
+    chunks = _split_by_tokens(transcript_text, CHUNK_TOKENS, OVERLAP_TOKENS)
     logger.info("Transcript too large (%d est. tokens), splitting into %d chunks for curation", estimated, len(chunks))
 
     curated_parts = []
@@ -576,12 +664,7 @@ def curate_transcript(transcripts: list[dict]) -> str:
 
 def _curate_chunk(text: str) -> str:
     """Use LLM to curate a transcript chunk."""
-    openai = _get_openai()
-    response = _call_with_retry(lambda: openai.responses.create(
-        model=AGENT_MODEL,
-        input=f"{CURATION_PROMPT}\n\n{text}",
-    ))
-    return response.output_text
+    return _create_response(f"{CURATION_PROMPT}\n\n{text}", max_output_tokens=REPORT_MAX_OUTPUT)
 
 
 def _get_azure_openai() -> AzureOpenAI:
@@ -603,40 +686,46 @@ def _get_azure_openai() -> AzureOpenAI:
 
 
 def generate_embedding(text: str) -> list[float]:
-    """Generate embedding vector for the given text using the embedding model."""
+    """Generate an embedding, chunk-averaging when text exceeds the model limit."""
     client = _get_azure_openai()
-    response = _call_with_retry(lambda: client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=text,
-    ))
-    return response.data[0].embedding
+    if _estimate_tokens(text) <= EMBED_TOKEN_LIMIT:
+        response = _call_with_retry(lambda: client.embeddings.create(
+            model=EMBEDDING_MODEL, input=text,
+        ))
+        return response.data[0].embedding
+
+    # Too long: embed each chunk and average (length-weighted) into one vector.
+    chunks = _split_by_tokens(text, EMBED_TOKEN_LIMIT, 0)
+    logger.info("Embedding text too large, averaging %d chunks", len(chunks))
+    vectors, weights = [], []
+    for chunk in chunks:
+        resp = _call_with_retry(lambda c=chunk: client.embeddings.create(
+            model=EMBEDDING_MODEL, input=c,
+        ))
+        vectors.append(resp.data[0].embedding)
+        weights.append(max(_estimate_tokens(chunk), 1))
+    total = sum(weights)
+    return [sum(v[i] * w for v, w in zip(vectors, weights)) / total for i in range(len(vectors[0]))]
 
 
 def _estimate_tokens(text: str) -> int:
-    """Rough token estimate: ~1 token per 3 chars for Japanese."""
-    return len(text) // 3
+    """Token estimate via tiktoken (o200k_base); ~2 chars/token fallback."""
+    enc = _get_encoding()
+    if enc:
+        return len(enc.encode(text))
+    return len(text) // 2
 
 
 def _denoise_transcript(text: str) -> str:
-    """Denoise transcript, chunking if it exceeds TOKEN_LIMIT."""
+    """Denoise transcript, chunking if it exceeds the per-call input budget."""
     if not text:
         return text
 
     estimated = _estimate_tokens(text)
-    if estimated <= TOKEN_LIMIT:
-        # Small enough — single-pass denoise
+    if estimated <= INPUT_BUDGET:
         return _denoise_chunk(text)
 
-    # Chunk by character count (3 chars ≈ 1 token)
-    chunk_chars = CHUNK_SIZE * 3
-    overlap_chars = OVERLAP * 3
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_chars
-        chunks.append(text[start:end])
-        start = end - overlap_chars
-
+    chunks = _split_by_tokens(text, CHUNK_TOKENS, OVERLAP_TOKENS)
     logger.info("Transcript too large (%d est. tokens), splitting into %d chunks", estimated, len(chunks))
 
     denoised_parts = []
@@ -649,19 +738,15 @@ def _denoise_transcript(text: str) -> str:
 
 def _denoise_chunk(text: str) -> str:
     """Use LLM to remove noise from a transcript chunk."""
-    openai = _get_openai()
-    response = _call_with_retry(lambda: openai.responses.create(
-        model=AGENT_MODEL,
-        input=(
-            "以下のインタビュー文字起こしからノイズを除去してください。\n"
-            "- フィラー（えー、あの、うーん等）、意味のない繰り返し、誤認識を削除\n"
-            "- 会話の原文・内容はできるだけそのまま残す\n"
-            "- タイムスタンプは保持する\n"
-            "- 出力はクリーンアップされたテキストのみ（説明不要）\n\n"
-            f"{text}"
-        ),
-    ))
-    return response.output_text
+    return _create_response(
+        "以下のインタビュー文字起こしからノイズを除去してください。\n"
+        "- フィラー（えー、あの、うーん等）、意味のない繰り返し、誤認識を削除\n"
+        "- 会話の原文・内容はできるだけそのまま残す\n"
+        "- タイムスタンプは保持する\n"
+        "- 出力はクリーンアップされたテキストのみ（説明不要）\n\n"
+        f"{text}",
+        max_output_tokens=REPORT_MAX_OUTPUT,
+    )
 
 
 def _extract_questions(agent_responses: list[dict]) -> str:

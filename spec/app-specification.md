@@ -81,7 +81,7 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 | バックエンド | Python (FastAPI) | App Service 上で稼働 |
 | リアルタイム文字起こし | Azure AI Speech SDK | `microsoft-cognitiveservices-speech-sdk` CDN版（ブラウザ連続会話文字起こし・話者分離対応）|
 | AI エージェント | Microsoft Foundry Agent Service（Prompt Agent） | `azure-ai-projects` >= 2.0.0 Python SDK |
-| エージェントツール | Microsoft Learn MCP Server | エンドポイント: `https://learn.microsoft.com/api/mcp`（認証不要）|
+| エージェントツール | Microsoft Learn MCP Server + Foundry Web Search | Learn: `https://learn.microsoft.com/api/mcp`（認証不要）/ Web Search: 組み込み（Bingリソース事前作成不要）|
 | データストア | Azure Cosmos DB for NoSQL | Managed Identity 認証（`azure-cosmos`）|
 | Embedding | text-embedding-3-small | AI Foundry 経由でベクトル化 |
 | MCP Server | Azure Functions (Flex Consumption) | Cosmos DB ベクトル検索ツール提供 |
@@ -302,24 +302,28 @@ Interview Assistant AI は、ブラウザベースのインタビュー補助Web
 - **サービス**: Microsoft Foundry Agent Service
 - **SDK**: `azure-ai-projects` >= 2.0.0 (Python, Foundry projects new API)
   - 注意: v1.x とは互換性がない。必ず v2.x を使用すること
-- **モデル**: GPT-4o 以上推奨（`gpt-4o` / `gpt-4.1` / `gpt-5` / `gpt-5-mini` 等）。3 エージェント共通モデル
+- **モデル**: `gpt-5.4-mini`（既定。推論モデル / 入力272K・出力128K）。`AZURE_AGENT_MODEL` で変更可。長時間インタビューの要約・レポート生成を見越し大容量コンテキストを採用。伺 3 エージェント共通
 - **エンドポイント形式**: `https://<AIFoundryResourceName>.ai.azure.com/api/projects/<ProjectName>`
 - **エージェント呼び出し**: 各役割エージェントを `agent_reference` で指定して `openai.responses.create()` を呼ぶ。会話は毎回新規作成（ステートレス）
 - **出力スキーマ**: 全エージェント共通の JSON `{ related_info, keywords, suggested_questions, references }`。役割により使用するフィールドが異なる（未使用フィールドは空にする）
 
-#### MCP ツール（全エージェント共通）
+#### ツール（全エージェント共通）
 
-3 つのエージェントはすべて同じナレッジソースを参照する必要があるため、**同一の MCP ツールセット** を共有する。
+3 つのエージェントはすべて同じナレッジソースを参照するため、**同一のツールセット**（MCP + Web Search）を共有する。
 
 - **Microsoft Learn MCP Server**:
   - `server_label`: `"microsoft_learn"`
   - `server_url`: `"https://learn.microsoft.com/api/mcp"`
   - `require_approval`: `"never"`（リアルタイム性重視のため自動承認）
   - 利用可能ツール: `microsoft_docs_search`, `microsoft_code_sample_search`, `microsoft_docs_fetch`
+- **Foundry Web Search ツール**:
+  - `WebSearchTool()`（パラメータ不要）。Bing で公式Webをグラウンディングし、出典URL付きで回答
+  - **新** Web Search ツールであり、旧 Grounding with Bing Search（接続リソースの事前作成が必要）とは異なり事前リソース不要
+  - Microsoft / Azure 以外の用語・人名・組織名・業界用語や最新情勢の確認に使用
 
 #### MCP 集中管理パターン
 
-MCP サーバー設定の管理を煩雑にしないため、**`config.py` の単一定数 `MCP_SERVERS`** に集約する。`agent_service.py` の `_build_mcp_tools()` がこれを読み込んでツールリストを生成し、`ensure_agent()` がすべての役割エージェントに **同一のツールセット** を割り当てる。
+MCP サーバー設定の管理を煩雑にしないため、**`config.py` の単一定数 `MCP_SERVERS`** に集約する。`agent_service.py` の `_build_tools()` がこれを読み込んで MCP ツールリストを生成し、そこに Foundry Web Search ツールを加えた上で、`ensure_agent()` がすべての役割エージェントに **同一のツールセット** を割り当てる。
 
 - MCP サーバー URL を変更したい場合は `MCP_SERVERS` の 1 行を編集して `azd deploy` するだけで全エージェントに自動反映される
 - MCP サーバーを追加したい場合も `MCP_SERVERS` に要素を追加するのみ
@@ -335,6 +339,7 @@ MCP サーバー設定の管理を煩雑にしないため、**`config.py` の�
 - Speech-to-Text 誤認識を文脈から正規化（例: 「フォラグ」→「RAG」）
 - 既出キーワードリストとの差分で **新規キーワードのみ** を抽出
 - 新規キーワードがあれば素人向け補足説明を `related_info` に記述、`references` に対応 URL を1対1で対応
+- 説明の根拠は Microsoft / Azure 製品は Learn MCP、それ以外の用語・人名・組織名・最新情勢は Web Search を使い分ける
 - 新規キーワードが無ければ `related_info=""`, `keywords=[]`, `references=[]`（UI には何も表示しない）
 
 **2. `interview-questions`（質問生成 + 初回声掛け）**
@@ -364,7 +369,7 @@ MCP サーバー設定の管理を煩雑にしないため、**`config.py` の�
 # Foundry Agent Service クライアント初期化
 from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import PromptAgentDefinition, MCPTool
+from azure.ai.projects.models import PromptAgentDefinition, MCPTool, WebSearchTool
 
 project = AIProjectClient(
     endpoint=PROJECT_ENDPOINT,
@@ -381,6 +386,7 @@ shared_tools = [
     )
     for s in MCP_SERVERS
 ]
+shared_tools.append(WebSearchTool())  # 事前Bingリソース不要の組み込みWeb検索
 for agent_name, system_prompt in [
     ("interview-related-info", RELATED_INFO_SYSTEM_PROMPT),
     ("interview-questions",    QUESTIONS_SYSTEM_PROMPT),
@@ -389,7 +395,7 @@ for agent_name, system_prompt in [
     project.agents.create_version(
         agent_name=agent_name,
         definition=PromptAgentDefinition(
-            model="gpt-4o",
+            model="gpt-5.4-mini",
             instructions=system_prompt,
             tools=shared_tools,
         ),
@@ -426,6 +432,15 @@ response = openai.responses.create(
 - レポート生成完了後、WebSocket で `report_ready` を送信し、左ペインの「レポート表示」ボタンがクリック可能
 - レポートは Cosmos DB に保存
 - 生成状況は `GET /api/interviews/{id}/report/status` でも確認可能
+
+#### 長時間インタビューのトークン設計（キュレーション・レポート・ベクトル）
+
+数時間のインタビューでもコンテキスト超過や出力打ち切りで失敗しないよう、`tiktoken`（`o200k_base`）でトークン数を正確に計測して処理する。
+
+- **モデル上限**: `gpt-5.4-mini` は入力272K / 出力128K。入力予算 `INPUT_BUDGET=230K` を超えたら分割処理に切り替え
+- **map-reduce**: キュレーション・レポートは `CHUNK_TOKENS=110K` / `OVERLAP=5K` でチャンク分割し、各チャンクを要約→結合（map）した上で最終レポートを生成（reduce）
+- **出力上限**: レポート `REPORT_MAX_OUTPUT=28K`、キュレーション/要約 `DEFAULT_MAX_OUTPUT=16K` でコストを予測可能に。推論トークンを含むので途中切れ時は `incomplete_details` をログ出力
+- **埋め込み**: `text-embedding-3-small` の上限（8191）を超えるテキストは `EMBED_TOKEN_LIMIT=8K` でチャンク分割し、ベクトルを平均化して 1 本に集約
 
 #### MCP Server（ベクトル検索ツール）
 

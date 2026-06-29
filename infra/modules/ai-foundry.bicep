@@ -64,7 +64,7 @@ resource agentDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
     model: {
       format: 'OpenAI'
       name: agentModel
-      version: '2024-08-06'
+      version: '2026-03-17'
     }
     versionUpgradeOption: 'NoAutoUpgrade'
   }
