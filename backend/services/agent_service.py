@@ -77,6 +77,7 @@ RELATED_INFO_SYSTEM_PROMPT = """\
 - 2つのツールを適宜使い分けて説明の根拠とする:
   - **microsoft_docs_search**（Microsoft Learn MCP）: Microsoft / Azure 製品・技術の公式ドキュメント検索
   - **web_search**（Foundry Web 検索）: 上記以外の用語・人名・組織名・業界用語や、最新情勢・関連ニュースの確認に使用する。引用した出典 URL は references に含める
+    - web_search が返す **引用マーカー**（例: `citeturn0search0turn0search5`、`` 等の特殊記号）を related_info の本文に **絶対に含めないこと**。出典はマークダウンリンクと references 配列のみで表す
 
 ## 入力フォーマット
 入力には以下のセクションが含まれる:
@@ -99,7 +100,14 @@ RELATED_INFO_SYSTEM_PROMPT = """\
 - related_info に埋め込んだマークダウンリンク `[テキスト](URL)` の **すべての URL** を、必ず references 配列にも対応する要素として含めること（URL 完全一致）
 - references の title は related_info 内のリンクテキスト、または参照先ドキュメントの正式タイトルとすること
 - references にだけ URL を載せて related_info にリンクを埋め込まないことも避けること（説明と参照は1対1で対応）
-- 信頼できる URL が無い用語については related_info にもリンクを埋め込まず、references にも追加しないこと（不確実な URL を捏造しない）
+- 信頼できる URL が無い用語については related_info にもリンクを埋め込まず、references にも追加しないこと（不確実な URL を作り出さない）
+
+## 出力スタイル（必須）
+- related_info は **簡潔さと十分さのバランス** を取る。新規キーワード1個あたり **2〜3文程度** で、意味だけでなく「なぜ重要か」「この会話の文脈での使われ方」まで補足する
+- ただし教科書的な長文解説・ベストプラクティスの羅列・余談や、「メンテナンス」のような一般的すぎる平易な語の説明は避け、Interviewer の理解に本当に役立つ範囲に収める
+- 音声認識の誤認識は黙って正式名称に直して説明する。「〜は…の言い間違いと考えられる」のような推測・メタ説明を本文に書かない
+- 良い例:「**予知保全** は、振動や温度などのセンサーデータから故障の予兆を捉え、壊れる前に手を打つ保全手法です。定期交換が中心の従来手法に比べ、設備の停止時間や部品コストを抑えやすい点が特徴です。」
+- 悪い例:「この発話の「メンテナンス」は点検・整備のことです。文中の「新郎」は文脈上、異常や兆候の言い間違いと考えられ…」（一般的すぎる語の説明や、誤認識語への推測コメントを含む）
 
 ## 出力形式
 以下を JSON 形式で返す（このスキーマ以外のテキストは出力しない）:
@@ -121,7 +129,24 @@ QUESTIONS_SYSTEM_PROMPT = """\
 ## 役割
 - エキスパート（Interviewee）の暗黙知・ノウハウを引き出すため、Interviewer が次に聞くべき質問案をガイドする
 - インタビュー開始時には、Interviewer が最初に声掛けする内容案と最初の質問1個を提示する
-- microsoft_docs_search 等の MCP ツールを必要に応じて活用し、質問の根拠強化や深掘りに役立てる
+- microsoft_docs_search / web_search 等のツールは、質問の前提知識の確認や深掘りの観点出しに必要な範囲でのみ使う
+
+## 暗黙知を引き出す質問の原則（最重要）
+暗黙知は「一般論」ではなく「本人の具体的な経験」からしか出てこない。教科書や公式ドキュメントを読めば分かる質問はしない。
+- **実体験を問う**: 「一般にどうすべきか」ではなく「あなたが実際にどうしたか・どう判断したか」を聞く
+- **特定の1事例に絞らせる**: 「直近で〜したとき」「印象に残っている〜の事例」など、具体的な1ケースを想起させる
+- **判断の手がかり（cue）を聞く**: 「何を見て / どこで そう判断したか」「うまくいく / まずい をどう見分けるか」
+- **失敗・例外・想定外を突く**: ヒヤリとした事例・想定外だったこと・例外対応にこそ暗黙知が現れる
+- **初心者との差を聞く**: 「新人がやりがちな失敗は」「初心者には分かりにくいが、あなたは何で気づくか」
+
+## 質問文のスタイル（必須）
+- 1問は **80〜140字程度（最大160字）**。要点を押さえつつ、答えやすいよう状況設定や前提を一言添えてよい。ただし長い前置きや複数論点の詰め込みは避ける
+- 一度に問う論点は **1つだけ**。「AやB、Cなど」と複数の観点を並べない（ただし、その1論点を具体化する補足の一文は付けてよい）
+- 「どの粒度まで」「具体的な判断基準を」のような抽象語で締めず、本人の行動・経験を直接問う形で終える
+- 唐突に「その変化」「あの件」など文脈に無い指示語で始めない。質問だけで何を聞かれているか伝わるようにする
+- 悪い例（長すぎ・一般論）:「RBACによる権限分離とKey Vaultでの鍵管理について、設計初期段階で実際にどの粒度まで決めるべきでしょうか？たとえば誰にどのロールを割り当てるか、鍵のローテーションやアクセス監査をどう設計するかなど、具体的な判断基準を教えてください。」
+- 悪い例（短すぎ・文脈依存・手がかりだけ）:「その変化に気づいたとき、最初に何を見て異常だと判断しましたか？」（前提が無く唐突で、薄い）
+- 良い例（適度な長さ・実体験を具体的に）:「直近で権限設計を任されたとき、ロールの粒度は最終的にどこまで細かく分けましたか？その線引きを決めた一番の理由も教えてください。」「設備の異常検知で、数値には出ないけれど『これは危ない』と感じた経験はありますか？そのとき何を手がかりにされましたか？」
 
 ## 動作モード
 入力プレフィックスでモードを判別する:
@@ -130,7 +155,10 @@ QUESTIONS_SYSTEM_PROMPT = """\
 
 ## 初回声掛けモード
 - インタビュー情報（対象者・所属・関連情報・ゴール）に基づき、Interviewer が自然に声掛けできる内容案を related_info に記述する
-- suggested_questions に **最初の質問1個** を設定する（type は deepdive / broaden / challenge のいずれか1つ）
+- suggested_questions に **最初の質問1個** を設定する
+- **最初の質問はスコープを広くとる**。いきなり特定の事例・手がかり・細部に踏み込まず、対象者の役割・担当領域・これまでの経験の全体像など、相手が自由に話を広げられるオープンな問いにする（type は **broaden** 推奨）
+- 悪い例（初回なのに特化しすぎ）:「直近で設備トラブルを未然に防げた事例を、最初に何を見て気づいたかまで教えてください。」
+- 良い例（広く開かれた問い）:「まず、現在ご担当されている設備保全のお仕事について、全体像や特に力を入れてこられた点を教えていただけますか？」
 - references は不要（空配列）
 
 ## 質問生成モードの手順
@@ -140,10 +168,10 @@ QUESTIONS_SYSTEM_PROMPT = """\
 - `## 直近の対話`: 中心トピック特定用の末尾（最大2,000字）
 
 1. **中心トピック特定**: 「直近の対話」セクションから、現在 Interviewer / Interviewee が話している中心トピックを **内部的に1文で** 特定する。直近部分が短すぎて判断困難な場合は「文字起こし全履歴」をさらに遡って文脈を補ってよい。この1文は出力しない
-2. **3つの質問を タイプごとに異なるスコープで生成** する。3つとも中心トピックと何らかの関連性を持つこと（無関係な題材への飛躍は禁止）。各タイプで参照する素材の範囲は以下のように使い分ける:
-   - **deepdive**: 「直近の対話」の中心トピックに **強く拘束** し、その具体例・判断基準・手順詳細・具体的な数値・例外ケース等を深掘りする質問。直近で話された内容に近い範囲に留めること
-   - **broaden**: 「文字起こし全履歴」「インタビューゴール」「対象者の所属・関連情報」を **見渡し**、中心トピックを起点として、まだ掘れていない隣接領域・別観点・ゴール達成のために重要な周辺領域に拡張する質問。中心トピックとの関連性を rationale に1文で示すこと
-   - **challenge**: 中心トピックの前提を疑う・矛盾を突く・例外ケースを問う質問。「文字起こし全履歴」を参照して、エキスパートの過去発言が現在の議論と矛盾する点や、暗黙の前提を探し出して突くことも積極的に行ってよい
+2. **3つの質問を タイプごとに異なるスコープで生成** する。3つとも中心トピックと関連を持つこと（無関係な題材への飛躍は禁止）。いずれも上記「暗黙知を引き出す質問の原則」と「質問文のスタイル」に従い、本人の具体的な経験・事例・判断の手がかりを引き出す形にする:
+   - **deepdive**: 「直近の対話」の中心トピックに **強く拘束** し、本人が実際に経験した具体例・そのときの判断基準や手がかり・数値・例外対応を1点に絞って深掘りする
+   - **broaden**: 「文字起こし全履歴」「インタビューゴール」「対象者の所属・関連情報」を見渡し、中心トピックを起点に、まだ聞けていない隣接領域での **本人の経験・事例** に広げる。一般論ではなく体験を問う。中心トピックとの関連を rationale に1文で示す
+   - **challenge**: 中心トピックの前提・例外・失敗を突く。「うまくいかなかった事例」「想定外だったこと」「新人がやりがちな失敗」や、過去発言と現在の議論の矛盾点を問う
 3. **ゴール意識**: インタビューゴールの達成と、エキスパートの暗黙知抽出を最優先とする質問を選ぶこと
 
 ## 出力形式
@@ -760,6 +788,27 @@ def _extract_questions(agent_responses: list[dict]) -> str:
     return "\n".join(questions) if questions else ""
 
 
+# Web-search citation markers the model sometimes leaks into prose, e.g.
+# "\ue200cite\ue202turn0search0\ue202turn0search5\ue201" (may render as
+# "citeturn0search0turn0search5"). They are noise in the UI because real
+# sources are surfaced via the references array / markdown links, so strip
+# them from any text shown to the user.
+_WEBSEARCH_CITATION_RE = re.compile(
+    r"[ \t]*[\ue200-\ue20f]*cite[\ue200-\ue20f]*"
+    r"(?:turn\d+[a-z]+\d+[\ue200-\ue20f]*)+[ \t]*"
+)
+_PRIVATE_USE_RE = re.compile(r"[\ue200-\ue20f]+")
+
+
+def _strip_web_citations(text: str) -> str:
+    """Remove web-search citation markers leaked into model prose."""
+    if not text:
+        return text
+    cleaned = _WEBSEARCH_CITATION_RE.sub("", text)
+    cleaned = _PRIVATE_USE_RE.sub("", cleaned)
+    return re.sub(r" {2,}", " ", cleaned).strip()
+
+
 def _parse_agent_response(raw: str) -> dict:
     """Parse agent JSON response, tolerating markdown fences."""
     text = raw.strip()
@@ -779,9 +828,9 @@ def _parse_agent_response(raw: str) -> dict:
             "references": [],
         }
 
-    related_info = data.get("related_info", "") or ""
+    related_info = _strip_web_citations(data.get("related_info", "") or "")
     references = [
-        {"title": r.get("title", ""), "url": r.get("url", "")}
+        {"title": _strip_web_citations(r.get("title", "")), "url": r.get("url", "")}
         for r in (data.get("references") or [])
         if r.get("url")
     ]
@@ -800,7 +849,7 @@ def _parse_agent_response(raw: str) -> dict:
             if isinstance(k, (str, int, float)) and str(k).strip()
         ],
         "suggestedQuestions": [
-            {"type": q.get("type", ""), "question": q.get("question", ""), "rationale": q.get("rationale", "")}
+            {"type": q.get("type", ""), "question": _strip_web_citations(q.get("question", "")), "rationale": _strip_web_citations(q.get("rationale", ""))}
             for q in data.get("suggested_questions", [])
         ],
         "references": references,
