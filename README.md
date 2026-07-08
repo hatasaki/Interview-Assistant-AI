@@ -29,7 +29,6 @@ An AI-powered tool designed to help an Interviewer effectively elicit tacit know
 | Embedding | text-embedding-3-small (1536 dimensions) |
 | MCP Server | Azure Functions (Flex Consumption) - Streamable MCP Trigger |
 | Authentication | Managed Identity (DefaultAzureCredential) |
-| User Authentication | App Service Easy Auth (Microsoft Entra ID) |
 | Infrastructure | Bicep (New Foundry: CognitiveServices/accounts + projects) |
 
 ```mermaid
@@ -127,14 +126,12 @@ azd up
 ```
 
 `azd up` automatically performs the following:
-1. Create Entra ID App Registration + client secret (preprovision hook)
-2. Build the frontend (`npm ci && npm run build`) → copy to `backend/static/`
-3. Provision Azure resources including Easy Auth configuration (Bicep)
-4. Set redirect URI on the App Registration (postprovision hook)
-5. Create Cosmos DB vector search container with retry (postprovision hook)
-6. Deploy the backend (App Service) and MCP server (Function App)
+1. Build the frontend (`npm ci && npm run build`) → copy to `backend/static/`
+2. Provision Azure resources (Bicep)
+3. Create Cosmos DB vector search container with retry (postprovision hook)
+4. Deploy the backend (App Service) and MCP server (Function App)
 
-After deployment, the app is protected by Microsoft Entra ID authentication. Only users in the same tenant can access the application.
+After deployment, the app is publicly accessible without sign-in.
 
 ## Changing the Default Model
 
@@ -227,17 +224,15 @@ npm run dev
 ## Project Structure
 
 ```
-├── azure.yaml              # azd configuration (preprovision/postprovision/prepackage hooks)
+├── azure.yaml              # azd configuration (postprovision/prepackage hooks)
 ├── infra/                   # Bicep infrastructure definitions (New Foundry)
 │   ├── main.bicep
 │   ├── scripts/
-│   │   ├── auth-preprovision.ps1/sh   # Entra ID App Registration creation
-│   │   ├── auth-postprovision.ps1/sh  # Redirect URI + vector container creation
 │   │   └── create-vector-container.ps1/sh  # Cosmos DB vector container (with retry)
 │   └── modules/
 │       ├── ai-foundry.bicep    # CognitiveServices/accounts + projects + embedding model
 │       ├── ai-rbac.bicep
-│       ├── app-service.bicep   # App Service + Easy Auth (authsettingsV2)
+│       ├── app-service.bicep   # App Service
 │       ├── cosmos-db.bicep     # Cosmos DB + containers + vector search capability
 │       ├── cosmos-rbac.bicep
 │       └── function-app.bicep  # Azure Functions (Flex Consumption) MCP Server
@@ -299,10 +294,8 @@ Each call uses an independent conversation (stateless) to prevent context bloat 
 | Cosmos DB for NoSQL (Serverless) | Data persistence + Vector search |
 | Azure Functions (Flex Consumption) | MCP Server (interview vector search tools) |
 | Storage Account | Function App deployment storage |
-| Entra ID App Registration | Easy Auth user authentication (auto-created by `azd up`) |
 
 All inter-resource authentication uses **Managed Identity** (key-based authentication is prohibited).
-User authentication is handled by **App Service Easy Auth** with Microsoft Entra ID.
 
 ## MCP Server
 
@@ -419,7 +412,6 @@ After creating this file, use GitHub Copilot Agent mode to query your interview 
 | Embedding | text-embedding-3-small (1536次元) |
 | MCP Server | Azure Functions (Flex Consumption) - Streamable MCP Trigger |
 | 認証 | Managed Identity (DefaultAzureCredential) |
-| ユーザー認証 | App Service Easy Auth (Microsoft Entra ID) |
 | インフラ | Bicep (New Foundry: CognitiveServices/accounts + projects) |
 
 ```mermaid
@@ -517,13 +509,12 @@ azd up
 ```
 
 `azd up` により以下が自動実行されます：
-1. Entra ID App Registration + クライアントシークレットの作成 (preprovision フック)
-2. フロントエンドのビルド（`npm ci && npm run build`）→ `backend/static/` にコピー
-3. Azure リソースのプロビジョニング（Bicep / Easy Auth 構成含む）
-4. App Registration のリダイレクト URI 設定 + Cosmos DB ベクトルコンテナ作成 (postprovision フック)
-5. バックエンドのデプロイ（App Service）+ MCP Serverのデプロイ（Function App）
+1. フロントエンドのビルド（`npm ci && npm run build`）→ `backend/static/` にコピー
+2. Azure リソースのプロビジョニング（Bicep）
+3. Cosmos DB ベクトルコンテナ作成 (postprovision フック)
+4. バックエンドのデプロイ（App Service）+ MCP Serverのデプロイ（Function App）
 
-デプロイ後、アプリは Microsoft Entra ID 認証で保護されます。同一テナントのユーザーのみアクセス可能です。
+デプロイ後、アプリはサインイン不要で誰でもアクセスできます。
 
 ## デフォルトモデルの変更
 
@@ -616,17 +607,15 @@ npm run dev
 ## プロジェクト構成
 
 ```
-├── azure.yaml              # azd 構成（preprovision/postprovision/prepackage フック付き）
+├── azure.yaml              # azd 構成（postprovision/prepackage フック付き）
 ├── infra/                   # Bicep インフラ定義 (New Foundry)
 │   ├── main.bicep
 │   ├── scripts/
-│   │   ├── auth-preprovision.ps1/sh   # Entra ID App Registration 作成
-│   │   ├── auth-postprovision.ps1/sh  # リダイレクト URI 設定 + ベクトルコンテナ作成
 │   │   └── create-vector-container.ps1/sh  # Cosmos DB ベクトルコンテナ（リトライ付き）
 │   └── modules/
 │       ├── ai-foundry.bicep    # CognitiveServices/accounts + projects + Embeddingモデル
 │       ├── ai-rbac.bicep
-│       ├── app-service.bicep   # App Service + Easy Auth (authsettingsV2)
+│       ├── app-service.bicep   # App Service
 │       ├── cosmos-db.bicep     # Cosmos DB + コンテナ + ベクトル検索 capability
 │       ├── cosmos-rbac.bicep
 │       └── function-app.bicep  # Azure Functions (Flex Consumption) MCP Server
@@ -688,10 +677,8 @@ npm run dev
 | Cosmos DB for NoSQL (Serverless) | データ永続化 + ベクトル検索 |
 | Azure Functions (Flex Consumption) | MCP Server（インタビューベクトル検索ツール） |
 | Storage Account | Function App デプロイメントストレージ |
-| Entra ID App Registration | Easy Auth ユーザー認証（`azd up` で自動作成） |
 
 すべてのリソース間認証は **Managed Identity** を使用しています（キーベース認証は禁止）。
-ユーザー認証は **App Service Easy Auth** (Microsoft Entra ID) で保護されています。
 
 ## MCP Server
 

@@ -21,13 +21,6 @@ param agentModel string = 'gpt-5.4-mini'
 @description('Embedding model name')
 param embeddingModel string = 'text-embedding-3-small'
 
-@description('Entra ID App Registration client ID for Easy Auth')
-param authClientId string = ''
-
-@secure()
-@description('Entra ID App Registration client secret for Easy Auth')
-param authClientSecret string = ''
-
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = { 'azd-env-name': environmentName }
@@ -87,8 +80,6 @@ module appService 'modules/app-service.bicep' = {
     speechEndpoint: aiFoundry.outputs.aiServicesEndpoint
     agentModel: agentModel
     embeddingModel: embeddingModel
-    authClientId: authClientId
-    authClientSecret: authClientSecret
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
   }
 }
