@@ -120,7 +120,10 @@ Real-time transcription uses Azure AI Speech's **`ConversationTranscriber`**, wh
 
 ## Deployment
 
+> **Quickstart branch**: The `quickstart` branch removes user authentication (App Service Easy Auth / Entra ID app registration), so you can deploy and try the app without any auth setup. Run `azd up` on this branch.
+
 ```bash
+git checkout quickstart   # switch to the auth-free quickstart branch
 azd auth login
 azd up
 ```
@@ -503,7 +506,10 @@ graph TB
 
 ## デプロイ
 
+> **quickstart ブランチ**: `quickstart` ブランチはユーザー認証（App Service Easy Auth / Entra ID アプリ登録）を削除しているため、認証設定なしでそのままデプロイして試せます。このブランチで `azd up` を実行してください。
+
 ```bash
+git checkout quickstart   # 認証不要の quickstart ブランチに切り替え
 azd auth login
 azd up
 ```
